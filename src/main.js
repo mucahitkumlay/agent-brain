@@ -22,7 +22,7 @@ const VIEW_MINI = 'agent-brain-mini';
 const DEFAULTS = {
   port: 27182, ambient: false, autoRotate: true, regionLabels: false, bloom: true, glass: 0.62,
   follow: true, memoryTrace: true, notifyApproval: true, notifyReply: true, desktopNotify: true,
-  quality: 'auto', fps: 60, glow: 0.45,
+  quality: 'auto', fps: 60, frameRate: 'auto', glow: 0.45,
   dailyNote: true, dailyFolder: 'Claude Activity', learning: true, minimal: false,
   showSessions: true, sessionsOpen: true, showActivity: false, showTimeline: false, showRegions: false,
   showInner: true, showTracts: true, showNotes: true, sliceOn: false, sliceAxis: 'x', slicePos: 0.5, sliceCut: true,
@@ -659,8 +659,10 @@ class BrainView extends ItemView {
       for (let i = 0; i < m.nv; i++) { const l = AAL_LOBE[this.anat.aal[i]]; if (m.lobe[i] !== 7 && l >= 0) m.lobe[i] = l; }
       m.aalLobes = true;
     }
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
-    this.qLevel = 0;
+    const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: 'high-performance' });
+    // start where auto quality settled last time on this screen, so it doesn't walk down the steps again at every start
+    const al = this.plugin.settings.autoLevel;
+    this.qLevel = al && al.dpr === (window.devicePixelRatio || 1) ? Math.max(0, al.level | 0) : 0;
     renderer.setPixelRatio(this.qualityScale());
     renderer.setClearColor(0x030407, 1);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -762,8 +764,12 @@ class BrainView extends ItemView {
     const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: q0.samples });
     rt.texture.name = 'cb.scene';
     this.composer = new EffectComposer(renderer, rt);
+    this.composer.renderTarget2.samples = 0;   // only the scene needs MSAA: halves the video memory it takes
     this.composer.setPixelRatio(q0.scale);
     this.msaa = q0.samples;
+    // the GPU can drop the context (driver reset, too little video memory): stop drawing, and rebuild once it is back
+    this.registerDomEvent(renderer.domElement, 'webglcontextlost', (e) => { e.preventDefault(); this.glLost = true; });
+    this.registerDomEvent(renderer.domElement, 'webglcontextrestored', () => { this.glLost = false; this.rebuildGL(); });
     this.composer.addPass(new RenderPass(scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.4, 0.42, 0.42);
     this.composer.addPass(this.bloom);
@@ -780,11 +786,12 @@ class BrainView extends ItemView {
     if (q === 'high') return { scale: Math.min(2, dpr), samples: ms(4) };
     if (q === 'low') return { scale: Math.min(1, dpr), samples: ms(2) };
     const steps = [
-      { scale: Math.min(2, dpr), samples: ms(4) },
       { scale: Math.min(1.5, dpr), samples: ms(4) },
       { scale: Math.min(1.25, dpr), samples: ms(4) },
       { scale: Math.min(1, dpr), samples: ms(4) },
       { scale: Math.min(1, dpr), samples: ms(2) },
+      { scale: Math.min(1, dpr), samples: 0 },
+      { scale: Math.min(0.85, dpr), samples: 0 },
     ].filter((x, i, a) => !i || x.scale !== a[i - 1].scale || x.samples !== a[i - 1].samples);
     this.qMax = steps.length - 1;
     return steps[Math.min(this.qLevel || 0, steps.length - 1)];
@@ -796,11 +803,20 @@ class BrainView extends ItemView {
     this.renderer.setPixelRatio(q.scale);
     this.composer.setPixelRatio(q.scale);
     if (q.samples !== this.msaa) {
-      for (const t of [this.composer.renderTarget1, this.composer.renderTarget2]) { t.samples = q.samples; t.dispose(); }
+      const t = this.composer.renderTarget1; t.samples = q.samples; t.dispose();
       this.msaa = q.samples;
     }
-    this.resize();
+    this.resize();   // a new pixel ratio is a real resize: it redraws at once
     this.needsDraw = true;
+  }
+  // after the GPU context comes back, everything on it has to be made again
+  rebuildGL() {
+    if (!this.running) return;
+    try {
+      this.running = false;
+      if (this.raf) cancelAnimationFrame(this.raf);
+      this.onClose().then(() => this.onOpen());
+    } catch (e) { console.error('[agent-brain] could not rebuild after a GPU reset', e); }
   }
   // frame timing: rolling average of the interval between consecutive drawn frames
   trackFrame(now) {
@@ -809,24 +825,17 @@ class BrainView extends ItemView {
     if (!prev || now - prev > 250) { this.slowSince = 0; return; }
     const dtm = now - prev;
     this.ft = this.ft ? this.ft * 0.94 + dtm * 0.06 : dtm;
-    const expected = this.plugin.settings.fps === 30 ? 1000 / 30 : 1000 / 60;
+    const expected = 1000 / (this.fpsTarget || 60);
+    this.load = this.load ? this.load * 0.94 + (dtm / expected) * 0.06 : dtm / expected;   // 1 = on time
     if (this.plugin.settings.quality !== 'auto') return;
-    if (this.ft > expected * 1.35) {
-      this.fastSince = 0;
+    // a step only ever goes down (each one reallocates the buffers, so going back and forth would stutter)
+    if (this.load > 1.3) {
       if (!this.slowSince) this.slowSince = now;
-      else if (now - this.slowSince > 3000 && (this.qLevel || 0) < (this.qMax || 0)) {
-        // a step up that made it slow again: stay at this level from now on
-        if (this.qUpAt && now - this.qUpAt < 20000) this.qCeil = (this.qLevel || 0) + 1;
-        this.qLevel = (this.qLevel || 0) + 1; this.slowSince = 0; this.ft = expected; this.qDownAt = now; this.applyQuality();
+      else if (now - this.slowSince > 5000 && (this.qLevel || 0) < (this.qMax || 0)) {
+        this.qLevel = (this.qLevel || 0) + 1; this.slowSince = 0; this.load = 1; this.applyQuality();
+        this.plugin.settings.autoLevel = { dpr: window.devicePixelRatio || 1, level: this.qLevel }; this.plugin.saveAll();
       }
-    } else {
-      this.slowSince = 0;
-      // plenty of headroom for a while: try one step sharper
-      if ((this.qLevel || 0) > (this.qCeil || 0) && this.ft < expected * 1.08) {
-        if (!this.fastSince) this.fastSince = now;
-        else if (now - this.fastSince > 10000 && now - (this.qDownAt || 0) > 30000) { this.qLevel--; this.fastSince = 0; this.qUpAt = now; this.ft = expected; this.applyQuality(); }
-      } else this.fastSince = 0;
-    }
+    } else this.slowSince = 0;
   }
 
   /* ---------- full anatomy: gyri, inner structures, fibre tracts, MRI slice ---------- */
@@ -1369,12 +1378,17 @@ class BrainView extends ItemView {
     const w = Math.max(1, cw), h = Math.max(1, ch);
     this.needsDraw = true;
     this.cssW = w; this.cssH = h;
-    this.renderer.setSize(w, h, false);
-    this.canvas.style.width = w + 'px'; this.canvas.style.height = h + 'px';
-    this.composer.setSize(w, h);
-    this.bloom.setSize(w, h);
-    const dpr = window.devicePixelRatio || 1;
-    this.overlay.width = Math.floor(w * dpr); this.overlay.height = Math.floor(h * dpr);
+    // resizing a canvas clears it, even to the same size: only touch the buffers when something really changed
+    const pr = this.renderer.getPixelRatio(), dpr = window.devicePixelRatio || 1;
+    const changed = w !== this._rw || h !== this._rh || pr !== this._rpr || dpr !== this._rdpr;
+    if (changed) {
+      this._rw = w; this._rh = h; this._rpr = pr; this._rdpr = dpr;
+      this.renderer.setSize(w, h, false);
+      this.canvas.style.width = w + 'px'; this.canvas.style.height = h + 'px';
+      this.composer.setSize(w, h);
+      this.bloom.setSize(Math.max(2, Math.round(w / 2)), Math.max(2, Math.round(h / 2)));
+      this.overlay.width = Math.floor(w * dpr); this.overlay.height = Math.floor(h * dpr);
+    }
     this.camera.aspect = w / h;
     // nudge the brain right of centre so the region list on the left doesn't collide with its labels
     let shift = 0;
@@ -1383,6 +1397,8 @@ class BrainView extends ItemView {
     const lift = this.mini ? -Math.round(h * 0.16) : 0;    // mini: sit below the session list
     if (shift || lift) this.camera.setViewOffset(w, h, shift, lift, w, h); else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
+    // and after a real resize, draw at once so no empty frame reaches the screen (a visible blink)
+    if (changed && this.running && this.visible && !this.glLost && this.nodes) { this.draw(); this.drawEeg(); }
   }
 
   updateCamera() {
@@ -3039,10 +3055,14 @@ class BrainView extends ItemView {
     const moving = rotating || following || interacting || this.needsDraw || this.hover || this.replay || (this.tractSpikes && this.tractSpikes.length) || (this.inner && this.inner.some(it => it.act > 0.01)) ||
       this.spikes.length || this.pulses.length || this.waves.length || this.pings.length || this.tags.length ||
       (now - this.lastActivity) < 4000 || this.plugin.anyLive() || !!this.dream || now - this.lastDraw > 1000;
-    if (!moving) { this.lastFrameAt = 0; return; }
-    // battery mode: every other frame, so the cadence stays even instead of alternating 33/50 ms
-    this.frameN = (this.frameN + 1) | 0;
-    if (this.plugin.settings.fps === 30 && !interacting && (this.frameN & 1)) return;
+    if (!moving || this.glLost) { this.lastFrameAt = 0; return; }
+    // frame rate: 60 while you drag, zoom, replay or inspect; 30 for the slow ambient motion; 20 when Obsidian is in
+    // the background. Capped at 60 on high-refresh screens. Halves the GPU work most of the time.
+    const fr = this.plugin.settings.frameRate || 'auto';
+    const lively = interacting || !!this.replay || (!this.frozen && (this.timeScale || 1) < 1);
+    const target = fr === '60' ? 60 : fr === '30' ? (interacting ? 60 : 30) : lively ? 60 : !document.hasFocus() ? 20 : 30;
+    if (target !== this.fpsTarget) { this.fpsTarget = target; this.lastFrameAt = 0; }
+    if (now - (this.lastDraw || 0) < 1000 / target - 3) return;
     this.lastDraw = now;
     this.needsDraw = false;
     this.draw();
@@ -3494,7 +3514,11 @@ class BrainView extends ItemView {
         }
       }
       sg.setDrawRange(0, k);
-      sg.attributes.position.needsUpdate = true; sg.attributes.aColor.needsUpdate = true; sg.attributes.aSize.needsUpdate = true; sg.attributes.aGlow.needsUpdate = true;
+      // upload only the points in use, not the whole 5000-point buffer, every frame
+      for (const a of [sg.attributes.position, sg.attributes.aColor, sg.attributes.aSize, sg.attributes.aGlow]) {
+        if (a.clearUpdateRanges) { a.clearUpdateRanges(); a.addUpdateRange(0, Math.max(1, k) * a.itemSize); }
+        a.needsUpdate = true;
+      }
       this.spikeObj.material.uniforms.uScale.value = this.nodeObj ? this.nodeObj.material.uniforms.uScale.value : 300;
       this.spikeObj.material.uniforms.uRing.value = LK.ring * 0.5;
     }
@@ -3708,6 +3732,8 @@ class AgentBrainPlugin extends Plugin {
     const data = (await this.loadData()) || {};
     const { memory, learned, daily, engram, regions, ...saved } = data;
     this.settings = Object.assign({}, DEFAULTS, saved);
+    // older versions only had fps (60 or 30): Battery stays Battery, everyone else gets the adaptive rate
+    if (!saved || saved.frameRate == null) this.settings.frameRate = saved && Number(saved.fps) === 30 ? '30' : 'auto';
     this.memory = { at: Date.now(), day: dayKey(), trace: new Array(8).fill(0), today: new Array(8).fill(0) };
     if (memory && Array.isArray(memory.trace) && memory.trace.length === 8) {
       this.memory.at = Number(memory.at) || Date.now();
@@ -5103,12 +5129,12 @@ class BrainSettingTab extends PluginSettingTab {
         .onChange(async (v) => { this.plugin.settings.glow = v; this.plugin.settings.bloom = true; await save(); this.plugin.forEachView(w => { w.needsDraw = true; }); }));
     new Setting(containerEl).setName('Glass opacity').setDesc('Lower: inner neurons and fibers show through more. Higher: a more opaque, realistic surface.')
       .addSlider(s => s.setLimits(0.2, 1, 0.02).setValue(this.plugin.settings.glass).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.glass = v; await save(); }));
-    new Setting(containerEl).setName('Render quality').setDesc('Auto renders at your screen\'s full resolution with 4x antialiasing, lowers it only while frames are slow (never below the screen\'s own resolution) and goes back up when there is room. Maximum renders above screen resolution with 8x antialiasing: the sharpest picture, heavier on the GPU. Low is lightest on laptops.')
+    new Setting(containerEl).setName('Render quality').setDesc('Auto starts sharp (up to 1.5x with 4x antialiasing) and, if frames stay slow for a few seconds, steps down: first the antialiasing, then the resolution. Maximum renders above screen resolution with 8x antialiasing: the sharpest picture, heavier on the GPU. Low is lightest on laptops.')
       .addDropdown(d => d.addOption('auto', 'Auto').addOption('max', 'Maximum').addOption('high', 'High').addOption('low', 'Low').setValue(this.plugin.settings.quality)
-        .onChange(async (v) => { this.plugin.settings.quality = v; await save(); this.plugin.forEachView(view => { view.qLevel = 0; view.applyQuality(); }); }));
-    new Setting(containerEl).setName('Frame rate').setDesc('Smooth renders every screen refresh while something moves. Battery renders every other refresh, at an even pace.')
-      .addDropdown(d => d.addOption('60', 'Smooth').addOption('30', 'Battery').setValue(String(this.plugin.settings.fps))
-        .onChange(async (v) => { this.plugin.settings.fps = Number(v); await save(); }));
+        .onChange(async (v) => { this.plugin.settings.quality = v; this.plugin.settings.autoLevel = null; await save(); this.plugin.forEachView(view => { view.qLevel = 0; view.applyQuality(); }); }));
+    new Setting(containerEl).setName('Frame rate').setDesc('Adaptive: 60 fps while you drag, zoom, replay or inspect signals, 30 fps for the slow ambient motion, 20 fps while Obsidian is in the background. Smooth: always 60. Battery: 30 except while you drag.')
+      .addDropdown(d => d.addOption('auto', 'Adaptive').addOption('60', 'Smooth').addOption('30', 'Battery').setValue(String(this.plugin.settings.frameRate || 'auto'))
+        .onChange(async (v) => { this.plugin.settings.frameRate = v; this.plugin.settings.fps = v === '30' ? 30 : 60; await save(); }));
     new Setting(containerEl).setName('Auto-rotate').setDesc('Slowly rotates the brain when you are not interacting with it.')
       .addToggle(t => t.setValue(!!this.plugin.settings.autoRotate).onChange(async (v) => { this.plugin.settings.autoRotate = v; await save(); }));
     new Setting(containerEl).setName('Region names on the brain').setDesc('Always show lobe names. When off, a name only appears while something is happening there.')

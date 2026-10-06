@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.5
+- Much lighter on the GPU:
+  - Adaptive frame rate (new default): 60 fps only while you drag, zoom, replay or inspect; 30 fps for the slow ambient
+    motion; 20 fps while Obsidian is in the background; never above 60 on 120/144 Hz screens.
+  - Only the scene buffer is multisampled (the second buffer and the canvas no longer are), which halves the video
+    memory; the bloom runs at half its former resolution.
+  - Spike buffers upload only the points in use each frame.
+  - Auto quality starts at 1.5x at most, drops the antialiasing before the resolution, and remembers where it settled.
+- No more blinks: opening a panel or changing quality no longer clears the canvas for a frame, and auto quality no
+  longer steps up and down (each step reallocated the buffers).
+- If the GPU drops the WebGL context (driver reset, out of video memory), the view rebuilds itself when it comes back.
+
 ## 0.9.4
 - First release built by GitHub Actions from `package-lock.json`, with build-provenance attestations. Same plugin as
   0.9.3.
