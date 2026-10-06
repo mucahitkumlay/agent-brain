@@ -1,0 +1,25 @@
+name: Lockfile
+
+# Creates package-lock.json from package.json (exact versions) and commits it, for anyone without Node.js on their
+# machine. Run it from the Actions tab or with:  gh workflow run lockfile.yml
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --package-lock-only --ignore-scripts
+      - name: Commit it
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if git diff --cached --quiet; then echo "package-lock.json is already up to date"; else git commit -m "Add package-lock.json" && git push; fi
