@@ -30,4 +30,18 @@ for (const [c, want] of [['git -C /srv/app pull', 'web'], ['npm --prefix /srv/ap
 import { bashParts } from '../src/intent.js';
 const parts = bashParts('git pull && npm ci && npm test | tee out.log').map(p => p.cat + ':' + p.cmd).join(' ');
 if (parts !== 'web:git ops:npm exec:npm write:tee') { bad++; console.log('MISMATCH bashParts', parts); }
+// shellTargets: where a command reaches
+import { shellTargets } from '../src/intent.js';
+const st = (c) => shellTargets(c).map(([k, v]) => k + '=' + v).join(' ');
+for (const [c, want] of [
+  ['ssh -p 2222 deploy@build.example.com "tail /var/log/ci.log"', 'host=deploy@build.example.com'],
+  ['ssh -i ~/.ssh/key srv uptime', 'host=srv'],
+  ['scp dist.tgz root@10.0.0.5:/srv/ && rsync -av ./ backup:/data/', 'host=root@10.0.0.5 host=backup'],
+  ['curl -s https://ci.example.com/api/status > status.json', 'url=https://ci.example.com/api/status writes=status.json'],
+  ['cd /srv/app && npm run build 2>&1 | tee build.log', 'writes=build.log cd=/srv/app'],
+  ['git push origin main', 'git=push origin main'],
+  ['sudo systemctl restart nginx', 'as=root (sudo)'],
+  ['echo "a > b" && cat x > /dev/null 2>&1', ''],
+  ['scp C:/x.txt host:/tmp/', 'host=host'],
+]) { const got = st(c); if (got !== want) { bad++; console.log('MISMATCH shellTargets', JSON.stringify(c), '->', got, 'want', want); } }
 if (bad) { console.log('FAIL', bad, 'mismatches'); process.exitCode = 1; }

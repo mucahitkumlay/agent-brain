@@ -161,3 +161,32 @@ export function mcpCategory(name) {
   if (webServer) return 'web';
   return 'mcp';
 }
+
+// where a shell command reaches: web addresses, remote hosts, git remotes, files it writes, folders it moves to
+const SSH_ARG = /^-[pioclFJLRDbEeOmQSWw]$/;
+export function shellTargets(cmd) {
+  const out = [], t = String(cmd || '');
+  const add = (k, v) => { v = String(v || '').replace(/^['"]+|['"]+$/g, ''); if (v && out.length < 24 && !out.some(o => o[0] === k && o[1] === v)) out.push([k, v]); };
+  for (const m of t.matchAll(/\b(?:https?|ftp|wss?):\/\/[^\s'"<>|;)`]+/g)) add('url', m[0]);
+  const plain = t.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""');
+  for (const seg of plain.split(/\|\||&&|;|\n|\|/)) {
+    const w = seg.trim().split(/\s+/).filter(Boolean);
+    const at = w.findIndex(x => /^(ssh|mosh|ssh-copy-id|scp|rsync|sftp)$/.test(x.replace(/^.*\//, '')));
+    if (at < 0) continue;
+    const prog = w[at].replace(/^.*\//, '');
+    if (prog === 'ssh' || prog === 'mosh' || prog === 'ssh-copy-id' || prog === 'sftp') {
+      for (let i = at + 1; i < w.length; i++) { if (SSH_ARG.test(w[i])) { i++; continue; } if (w[i].startsWith('-')) continue; add('host', w[i].replace(/:.*$/, '')); break; }
+    } else {
+      for (const x of w.slice(at + 1)) {
+        const m = x.match(/^([\w.-]+@)?([\w-]+(?:\.[\w-]+)*):/);
+        if (m && !/^[a-z]+:\/\//i.test(x) && m[2].length > 1) add('host', (m[1] || '') + m[2]);
+      }
+    }
+  }
+  for (const m of plain.matchAll(/\bgit\s+(?:-C\s+\S+\s+)?(push|pull|fetch|clone|remote\s+add)\b([^|;&\n]*)/g)) add('git', (m[1] + ' ' + m[2].trim()).trim().slice(0, 80));
+  for (const m of plain.matchAll(/(?:^|[^0-9&<>=])>>?\s*([^\s|;&<>()]+)/g)) if (!/^&|^\/dev\/(null|stderr|stdout|tty)$|^""$/.test(m[1])) add('writes', m[1]);
+  for (const m of plain.matchAll(/\btee\s+(?:-a\s+)?([^\s|;&<>()-][^\s|;&<>()]*)/g)) if (m[1] !== '""') add('writes', m[1]);
+  for (const m of plain.matchAll(/(?:^|[;&|(]\s*)cd\s+([^\s;&|)]+)/g)) if (m[1] !== '""') add('cd', m[1]);
+  if (/(^|[\s;&|(])(sudo|doas)\s/.test(plain)) add('as', 'root (sudo)');
+  return out;
+}

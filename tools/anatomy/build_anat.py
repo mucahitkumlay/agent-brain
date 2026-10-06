@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the anatomy files Claude Brain draws (assets/*.bin.gz) from public neuroimaging data.
+"""Builds the anatomy files Agent Brain draws (assets/*.bin.gz) from public neuroimaging data.
 
 Sources (all from the niivue project's demo images, https://github.com/niivue/niivue, packages/niivue/demos/images):
   mni152_2009.mz3              ICBM152 2009 brain surface            (MNI / McGill, permissive licence, see THIRD_PARTY_NOTICES.md)

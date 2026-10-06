@@ -206,7 +206,7 @@ export function makeInner(parts, light) {
     const mesh = new THREE.Mesh(g, mat);
     mesh.renderOrder = p.kind === 'csf' ? 1 : 2;
     const c = g.boundingSphere.center;
-    out.push({ mesh, mat, name: p.name, side: p.side, kind: p.kind, center: { x: c.x, y: c.y, z: c.z }, act: 0, actColor: new THREE.Color(0xffffff), pos: p.pos, eng: 0, engC: new THREE.Color(0, 0, 0) });
+    out.push({ mesh, mat, alpha0: k.alpha, name: p.name, side: p.side, kind: p.kind, center: { x: c.x, y: c.y, z: c.z }, act: 0, actColor: new THREE.Color(0xffffff), pos: p.pos, eng: 0, engC: new THREE.Color(0, 0, 0) });
   }
   return out;
 }

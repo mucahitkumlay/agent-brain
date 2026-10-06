@@ -12,8 +12,9 @@ Issues and pull requests are welcome.
 | `src/styles.css` | the HUD |
 | `scripts/` | server side: hook with offline queue, flush, link (heartbeat and body signals), installer template, tunnel launchers |
 | `assets/` | anatomy data (see `tools/anatomy/README.md` and `THIRD_PARTY_NOTICES.md`) |
-| `test/` | node tests run against `dist/main.js` |
+| `test/` | node tests run against `dist/main.js`, including the security invariants |
 | `dev/` | browser harness with a mocked Obsidian |
+| `tools/build.mjs` | production build with the licence banner |
 
 ## Workflow
 
@@ -23,8 +24,12 @@ bun run build && bun run test
 node dev/prepare.mjs && (cd dev/www && python3 -m http.server 8799)   # then open the page and run __cbStart()
 ```
 
-Keep the plugin local-only: no outgoing requests besides the anatomy download, nothing that stores prompt or reply
-text, nothing that runs on a timer when the view is closed unless it is cheap.
+Keep the invariants: local only, watch never steer, one outgoing request, received content
+is data, nothing private on disk. `test/invariants.test.js` and `test/listener.test.js` check them. Also: nothing that
+runs on a timer when the view is closed unless it is cheap.
+
+By contributing you agree that your contribution is licensed under the MIT licence of this repository (data files
+under the terms listed in `THIRD_PARTY_NOTICES.md`), and that you have the right to submit it.
 
 ## Releases
 

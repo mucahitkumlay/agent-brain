@@ -1,8 +1,8 @@
 #!/bin/sh
-# Claude Brain tunnel (macOS / Linux). Keeps a reverse SSH tunnel to your server open, so Claude Code sessions
+# Agent Brain tunnel (macOS / Linux). Keeps a reverse SSH tunnel to your server open, so Claude Code sessions
 # running there can reach the plugin on this computer, and reconnects when it drops. Ctrl+C to stop.
 #
-#   ./claude-brain-tunnel.sh user@your-server
+#   ./agent-brain-tunnel.sh user@your-server
 # On the server, once, while the tunnel is up:  curl -s http://127.0.0.1:27182/install.sh | sh
 SERVER="${1:?usage: $0 user@host}"
 PORT="${2:-27182}"

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code hook -> Claude Brain (through the SSH tunnel).
+# Claude Code hook -> Agent Brain (through the SSH tunnel).
 # If the tunnel is down, the event is kept in a small queue and sent when it comes back.
 Q="$HOME/.claude/brain-queue.ndjson"
 P=$(cat)

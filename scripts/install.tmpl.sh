@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Brain server setup: hook script with offline queue, flush and heartbeat link, and the Claude Code hooks.
+# Agent Brain server setup: hook script with offline queue, flush and heartbeat link, and the Claude Code hooks.
 # Served by the Obsidian plugin through the tunnel:  curl -s http://127.0.0.1:27182/install.sh | sh
 set -e
 D="$HOME/.claude"
@@ -46,10 +46,10 @@ if not elsewhere:
     env.update({"CLAUDE_CODE_ENABLE_TELEMETRY": "1", "OTEL_LOGS_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
                 "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "http://127.0.0.1:27182/v1/logs", "OTEL_LOGS_EXPORT_INTERVAL": "1000"})
     env.setdefault("OTEL_METRICS_EXPORTER", "none")
-    print("Claude Brain: telemetry (model calls, tokens, cost) goes to the brain as well")
+    print("Agent Brain: telemetry (model calls, tokens, cost) goes to the brain as well")
 else:
-    print("Claude Brain: telemetry already goes elsewhere, left alone")
+    print("Agent Brain: telemetry already goes elsewhere, left alone")
 json.dump(s, open(p, "w"), indent=2)
-print("Claude Brain: hooks for %d events updated in %s (backup: settings.json.bak)" % (len(TOOLS) + len(PLAIN) + 1, p))
+print("Agent Brain: hooks for %d events updated in %s (backup: settings.json.bak)" % (len(TOOLS) + len(PLAIN) + 1, p))
 CB_EOF
-echo "Claude Brain: scripts installed in $D. Restart your Claude Code sessions so they load the new hooks, and restart the tunnel so the new link script runs."
+echo "Agent Brain: scripts installed in $D. Restart your Claude Code sessions so they load the new hooks, and restart the tunnel so the new link script runs."

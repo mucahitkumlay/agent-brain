@@ -1,9 +1,9 @@
 {
-  "id": "claude-brain",
-  "name": "Claude Brain",
-  "version": "0.8.0",
+  "id": "agent-brain",
+  "name": "Agent Brain",
+  "version": "0.9.0",
   "minAppVersion": "1.4.0",
-  "description": "Watch Claude Code work as live activity on a real MRI brain: sessions, subagents, every tool call and its result. Local only; uses no tokens.",
+  "description": "Watch your AI coding agent work as live activity on a real MRI brain: sessions, subagents, every tool call and its result. Works with Claude Code for now. Local only; uses no tokens.",
   "author": "mucahitkumlay",
   "authorUrl": "https://github.com/mucahitkumlay",
   "isDesktopOnly": true

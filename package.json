@@ -1,7 +1,7 @@
 {
-  "name": "claude-brain",
-  "version": "0.8.0",
-  "description": "Obsidian plugin: watch Claude Code work as live activity on a real MRI brain. Local only, uses no tokens.",
+  "name": "agent-brain",
+  "version": "0.9.0",
+  "description": "Obsidian plugin: watch your AI coding agent (Claude Code for now) work as live activity on a real MRI brain. Local only, uses no tokens.",
   "private": true,
   "license": "MIT",
   "repository": {
@@ -10,7 +10,7 @@
   },
   "scripts": {
     "prepare-assets": "node tools/prepare.mjs",
-    "build": "node tools/prepare.mjs && bun build src/main.js --outfile dist/main.js --target=node --format=cjs --minify --external obsidian --external http --external zlib && cp manifest.json src/styles.css dist/",
+    "build": "node tools/prepare.mjs && bun tools/build.mjs && cp manifest.json src/styles.css dist/",
     "dev": "node tools/prepare.mjs && bun build src/main.js --outfile dist/main.js --target=node --format=cjs --external obsidian --external http --external zlib --watch",
     "test": "node test/run.mjs",
     "harness": "node dev/prepare.mjs"

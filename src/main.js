@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Claude Brain — shows Claude Code sessions as live neural activity on a real MRI brain surface
+ * Agent Brain — shows Claude Code sessions as live neural activity on a real MRI brain surface
  * (MNI ICBM152 2009). WebGL (three.js) + bloom. Never calls a model and uses no tokens:
  * it only listens for hook events on 127.0.0.1.
  */
@@ -11,14 +11,14 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { INSTALL_SH } from './scripts.js';
 import { REPO, ASSETS } from './generated.js';
-import { bashCategory, bashParts, psCategory, mcpCategory } from './intent.js';
+import { bashCategory, bashParts, psCategory, mcpCategory, shellTargets } from './intent.js';
 import { AAL, AAL_LOBE, GYRI, aalName, bundleName, parseAal, parseInner, parseT1, parseTracts, makeInner, makeTracts, makeSlice } from './anatomy.js';
 
 const { Plugin, ItemView, Notice, PluginSettingTab, Setting, setIcon, requestUrl } = require('obsidian');
 const http = require('http');
 
-const VIEW_TYPE = 'claude-brain-view';
-const VIEW_MINI = 'claude-brain-mini';
+const VIEW_TYPE = 'agent-brain-view';
+const VIEW_MINI = 'agent-brain-mini';
 const DEFAULTS = {
   port: 27182, ambient: false, autoRotate: true, regionLabels: false, bloom: true, glass: 0.62,
   follow: true, memoryTrace: true, notifyApproval: true, notifyReply: true, desktopNotify: true,
@@ -27,7 +27,7 @@ const DEFAULTS = {
   showSessions: true, sessionsOpen: true, showActivity: false, showTimeline: false, showRegions: false,
   showInner: true, showTracts: true, showNotes: true, sliceOn: false, sliceAxis: 'x', slicePos: 0.5, sliceCut: true,
   traceMinutes: 90, vitals: true, showVitals: true,
-  telemetry: true, notifyStuck: true, dream: true, showEeg: true,
+  telemetry: true, notifyStuck: true, dream: true, showEeg: true, callDetails: true, look: 'anatomy',
 };
 // "who": one color per session. Chosen to stay apart from the lobe colors ("what").
 const SESSION_COLORS = ['#7fe0c2', '#c3a6ff', '#7cc4ff', '#f59ac0', '#b6e388', '#dfe6f2'];
@@ -212,6 +212,65 @@ function responseSize(r) {
   if (typeof r === 'object') { let n = 0; for (const k of ['stdout', 'stderr', 'content', 'output', 'result', 'text']) if (typeof r[k] === 'string') n += r[k].length; else if (Array.isArray(r[k])) n += r[k].length * 200; return n; }
   return 0;
 }
+// requests a browser page could make carry an Origin (a web origin) or Sec-Fetch-Site header; Claude Code's hooks,
+// its telemetry exporter, curl and the tunnel send neither, and always address 127.0.0.1 / localhost
+function fromThisMachine(h) {
+  h = h || {};
+  const host = String(h.host || '').toLowerCase();
+  if (host && !/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)) return false;
+  if (h['sec-fetch-site'] || h['sec-fetch-dest'] === 'document' || h['sec-fetch-dest'] === 'iframe') return false;
+  const o = h.origin;
+  if (o && o !== 'null') return false;
+  return true;
+}
+// ---------- full call details for the inspector: kept in memory only, never written to disk ----------
+const DETAIL_STR = 20000;      // longest string kept from one field
+const DETAIL_CALL = 160000;    // characters kept from one hook event
+const DETAIL_BUDGET = 24e6;    // characters kept for all events together; the oldest go first
+function capDeep(v, lim, depth) {
+  depth = depth || 0;
+  if (v == null || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (typeof v === 'string') {
+    const max = Math.max(160, Math.min(DETAIL_STR, lim.left));
+    const s = v.length > max ? v.slice(0, max) : v;
+    lim.left -= s.length;
+    return s.length < v.length ? s + `\n… [${(v.length - s.length).toLocaleString('en-US')} more characters not kept]` : s;
+  }
+  if (depth > 8) return '[…]';
+  if (Array.isArray(v)) {
+    const out = v.slice(0, 200).map(x => capDeep(x, lim, depth + 1));
+    if (v.length > 200) out.push(`[… ${v.length - 200} more items not kept]`);
+    return out;
+  }
+  if (typeof v === 'object') {
+    const o = {}; let i = 0;
+    for (const k of Object.keys(v)) { if (++i > 200) { o['…'] = 'more fields not kept'; break; } o[k] = capDeep(v[k], lim, depth + 1); lim.left -= k.length; }
+    return o;
+  }
+  return String(v);
+}
+// why each kind of work lands where it does
+const KIND_WHY = {
+  read: 'Reading and searching is retrieval: the language and memory streams of the temporal lobe, with the hippocampus.',
+  write: 'Writing a file is an action: primary and supplementary motor cortex, through the putamen.',
+  exec: 'Running a command is executive control: dorsolateral prefrontal cortex in its loop with the caudate and the thalamus.',
+  plan: 'Planning is holding a goal: the frontoparietal control network and the caudate.',
+  web: 'The web is the outside world coming in: the visual pathway into occipital cortex, relayed by the thalamus.',
+  agent: 'Handing work to another agent is delegation: parietal association cortex, relayed by the thalamus.',
+  ops: 'System work (services, packages, processes) is a practised routine: cerebellar loops and the globus pallidus.',
+  mcp: 'An MCP tool is an external instrument: cerebellar loops through the globus pallidus.',
+  other: 'A tool without a closer analogue: parietal association cortex.',
+  prompt: 'Your prompt is heard: auditory cortex and Wernicke\'s area, relayed by the thalamus.',
+  speak: 'Claude writing its reply is speech: Broca\'s area, fed by the arcuate fasciculus.',
+  think: 'Deliberation: prefrontal loops through the caudate.',
+  memory: 'Compacting context is consolidation: the hippocampus and parahippocampal gyrus.',
+  self: 'Instructions and settings are the model of itself: precuneus and posterior cingulate.',
+  alarm: 'Conflict (an error, a denial, a permission prompt): anterior cingulate and orbitofrontal cortex, with the amygdala.',
+  reward: 'A finished task is reward: medial orbitofrontal cortex and the caudate.',
+  place: 'Moving to another folder is navigation: the parahippocampal place area and precuneus.',
+  sense: 'A file changing on disk is a sensation: somatosensory cortex, via the thalamus.',
+  social: 'Asking you something is social: the angular gyrus and temporal pole, with the amygdala.',
+};
 const HOOK_TOOL_EVENTS = ['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'PermissionDenied'];
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'UserPromptExpansion', 'SubagentStart', 'SubagentStop', 'PreCompact', 'PostCompact', 'Notification',
   'Stop', 'StopFailure', 'SessionEnd', 'PostToolBatch', 'TaskCreated', 'TaskCompleted', 'InstructionsLoaded', 'CwdChanged', 'DirectoryAdded', 'ConfigChange',
@@ -312,7 +371,7 @@ void main() {
   #include <clipping_planes_vertex>
 }`;
 const BRAIN_FS = `
-uniform vec3 uLight; uniform vec3 uBase; uniform vec3 uRim; uniform float uGlass; uniform vec4 uCut; uniform float uCutOn;
+uniform vec3 uLight; uniform vec3 uBase; uniform vec3 uRim; uniform float uGlass; uniform vec4 uCut; uniform float uCutOn; uniform float uLook;
 varying vec3 vN; varying vec3 vV; varying float vDepth; varying vec3 vAct; varying float vDim; varying vec3 vTrace; varying vec3 vW;
 #include <clipping_planes_pars_fragment>
 void main() {
@@ -334,6 +393,14 @@ void main() {
   col += A * mix(0.25, 0.8, gyr);
   col *= vDim;
   float alpha = clamp(mix(1.0, uGlass, ndv) + fres * 0.4 + a * 0.3, 0.0, 1.0) * mix(0.18, 1.0, vDim);
+  // atlas look: the cortex becomes a faint glass shell with a clear outline, so the neurons, synapses and signals
+  // inside carry the picture; activity and the trace still colour it
+  if (uLook > 0.001) {
+    vec3 rimA = vec3(0.30, 0.37, 0.52);
+    vec3 colA = uBase * 0.04 * (0.5 + 0.5 * diff) * gyr + rimA * (0.035 + 0.6 * fres * gyr) + tr * 0.45 + A * 0.75;
+    float alphaA = clamp(0.012 + fres * gyr * 0.22 + a * 0.4 + min(tI * 0.04, 0.12), 0.0, 1.0) * mix(0.25, 1.0, vDim);
+    col = mix(col, colA * mix(0.3, 1.0, vDim), uLook); alpha = mix(alpha, alphaA, uLook);
+  }
   // in front of an MRI slice the cortex turns into a faint glass outline, so the slice shows but the brain stays whole
   float ghost = uCutOn * (1.0 - smoothstep(-2.5, 0.5, dot(uCut.xyz, vW) + uCut.w));
   col = mix(col, uRim * (0.2 + 0.9 * fres) + A * 0.25, ghost);
@@ -353,6 +420,7 @@ void main() {
   #include <clipping_planes_vertex>
 }`;
 const POINT_FS = `
+uniform float uRing;
 varying vec3 vC; varying float vG;
 #include <clipping_planes_pars_fragment>
 void main() {
@@ -360,10 +428,19 @@ void main() {
   vec2 p = gl_PointCoord - 0.5;
   float d = length(p) * 2.0;
   if (d > 1.0) discard;
-  float core = exp(-d * d * 7.0);
-  float halo = exp(-d * d * 2.2) * 0.25;
-  gl_FragColor = vec4(vC * (core + halo) * (0.42 + 1.25 * vG), core + halo);
+  // atlas look (uRing): a crisp core with a thin ring around it, so each neuron reads as a point, not a smudge
+  float core = exp(-d * d * mix(7.0, 18.0, uRing));
+  float halo = exp(-d * d * 2.2) * mix(0.25, 0.1, uRing);
+  float ring = uRing * (1.0 - smoothstep(0.0, 0.09, abs(d - 0.6))) * 0.32;
+  float v = core + halo + ring;
+  gl_FragColor = vec4(vC * v * (0.42 + 1.25 * vG), v);
 }`;
+// two ways to look at it: the realistic MRI glass, or a clear atlas where the brain is a faint shell and the neurons
+// (notes and files), synapses (links) and signals inside carry the picture
+const LOOKS = {
+  anatomy: { inner: 1, tract: 0.045, link: 0.04, learn: 0.22, node: 1, nodeSize: 1, tint: 0, spike: 1, bloom: 1, ring: 0, bg: 0x030407 },
+  atlas: { inner: 0.26, tract: 0.018, link: 0.065, learn: 0.4, node: 1.8, nodeSize: 1.3, tint: 0.45, spike: 1.25, bloom: 0.45, ring: 1, bg: 0x0a0b10 },
+};
 
 /* ================================================================ view */
 
@@ -392,7 +469,7 @@ class BrainView extends ItemView {
     this.eeg = { buf: EEG_CH.map(() => new Float32Array(EEG_N)), pos: 0, acc: 0, t: 0, env: new Float32Array(EEG_CH.length), kick: new Float32Array(EEG_CH.length), state: 'alpha' };
   }
   getViewType() { return this.mini ? VIEW_MINI : VIEW_TYPE; }
-  getDisplayText() { return this.mini ? 'Claude Brain (mini)' : 'Claude Brain'; }
+  getDisplayText() { return this.mini ? 'Agent Brain (mini)' : 'Agent Brain'; }
   getIcon() { return 'brain-circuit'; }
   // canvases draw labels in the same interface font as the theme
   fontUI() {
@@ -459,7 +536,7 @@ class BrainView extends ItemView {
     this.kpiEl = this.infoEl.createDiv({ cls: 'cb-kpis' });
     this.srcEl = this.infoEl.createDiv({ cls: 'cb-srcs' });
     const keys = this.infoEl.createDiv({ cls: 'cb-keys' });
-    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
+    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy or atlas'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
       const r = keys.createDiv({ cls: 'cb-key-row' });
       r.createEl('kbd', { text: k }); r.createSpan({ text: d });
     }
@@ -467,6 +544,13 @@ class BrainView extends ItemView {
 
     // anatomy layers popover
     this.layersEl = root.createDiv({ cls: 'cb-pop cb-layers' });
+    this.layersEl.createDiv({ cls: 'cb-pop-h', text: 'Look' });
+    const segL = this.layersEl.createDiv({ cls: 'cb-seg cb-seg-wide cb-look' });
+    this.lookBtns = [['anatomy', 'Anatomy', 'Realistic MRI glass'], ['atlas', 'Atlas', 'See-through brain: neurons, synapses and signals stand out']].map(([v, l, ttl]) => {
+      const b = segL.createEl('button', { cls: 'cb-tl-btn', text: l }); b.setAttr('title', ttl + ' (V)');
+      b.addEventListener('click', (e) => { e.stopPropagation(); this.setLook(v); });
+      return [v, b];
+    });
     this.layersEl.createDiv({ cls: 'cb-pop-h', text: 'Anatomy' });
     for (const [key, label, sub] of [['showInner', 'Inner structures', 'Thalamus, basal ganglia, hippocampus, amygdala, ventricles'], ['showTracts', 'Fibre tracts', 'White-matter pathways from the HCP-1065 atlas'], ['showNotes', 'Notes and links', 'Your vault as neurons and synapses'], ['memoryTrace', 'Activity trace', 'Where the work happened, fading over hours'], ['showVitals', 'Body signals', 'CPU, memory and traffic of each machine']]) {
       const r = this.layersEl.createEl('label', { cls: 'cb-switch' });
@@ -521,9 +605,9 @@ class BrainView extends ItemView {
     this.loadingEl = root.createDiv({ cls: 'cb-loading', text: 'loading brain model…' });
 
     try {
-      [this.mesh, this.anat] = await Promise.all([this.plugin.loadBrainMesh(), this.plugin.loadAnatomy().catch((e) => { console.error('[claude-brain] anatomy', e); return {}; })]);
+      [this.mesh, this.anat] = await Promise.all([this.plugin.loadBrainMesh(), this.plugin.loadAnatomy().catch((e) => { console.error('[agent-brain] anatomy', e); return {}; })]);
     } catch (e) {
-      console.error('[claude-brain]', e);
+      console.error('[agent-brain]', e);
       this.loadingEl.setText('Could not load the brain model: ' + (e && e.message ? e.message : e));
       return;
     }
@@ -544,7 +628,7 @@ class BrainView extends ItemView {
       this.rebuildTimer = window.setTimeout(() => { if (this.graphSignature() !== this.graphSig) this.buildGraph(); }, 4000);
     }));
     this.registerInterval(window.setInterval(() => { this.renderHud(); this.drawTimeline(); }, 1000));
-    this.renderHud(); this.renderLog(); this.renderTlButtons(); this.applyLayout(); this.renderSliceUi();
+    this.renderHud(); this.renderLog(); this.renderTlButtons(); this.applyLayout(); this.renderSliceUi(); this.renderLookUi();
     if (this.plugin.settings.sliceOn) this.togglePop('slice', true);
 
     this.running = true;
@@ -617,6 +701,7 @@ class BrainView extends ItemView {
         uBase: { value: new THREE.Color(0x5d6a82) },
         uRim: { value: new THREE.Color(0x5b8dff).multiplyScalar(0.42) },
         uGlass: { value: this.plugin.settings.glass },
+        uLook: { value: this.plugin.settings.look === 'atlas' ? 1 : 0 },
       },
       transparent: true, depthWrite: true, side: THREE.FrontSide, clipping: true,
     });
@@ -1009,7 +1094,7 @@ class BrainView extends ItemView {
     g.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(n), 1));
     const mat = new THREE.ShaderMaterial({
       vertexShader: POINT_VS, fragmentShader: POINT_FS,
-      uniforms: { uScale: { value: 300 } },
+      uniforms: { uScale: { value: 300 }, uRing: { value: 0 } },
       transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending, clipping: true,
     });
     if (this.clipOn) mat.clippingPlanes = [this.clipPlane];
@@ -1259,7 +1344,7 @@ class BrainView extends ItemView {
     // nudge the brain right of centre so the region list on the left doesn't collide with its labels
     let shift = 0;
     if (w > 900 && !this.mini && !this.plugin.settings.minimal) shift -= Math.round(Math.min(120, w * 0.06));
-    if (w > 760 && this.panel && !this.mini) shift += 180;
+    if (w > 760 && this.panel && !this.mini) shift += Math.round((this.panelWidth() + 30) / 2);
     const lift = this.mini ? -Math.round(h * 0.16) : 0;    // mini: sit below the session list
     if (shift || lift) this.camera.setViewOffset(w, h, shift, lift, w, h); else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
@@ -1723,6 +1808,7 @@ class BrainView extends ItemView {
     root.toggleClass('cb-show-regions', on('showRegions'));
     root.toggleClass('cb-show-eeg', on('showEeg'));
     root.toggleClass('cb-has-panel', !this.mini && !!this.panel);
+    root.toggleClass('cb-panel-wide', !this.mini && !!this.panel && this.panel.kind === 'signal');
     root.toggleClass('cb-replaying', !!this.replay);
     if (this.dockBtns) for (const k of ['showSessions', 'showActivity', 'showTimeline', 'showRegions', 'showEeg']) if (this.dockBtns[k]) this.dockBtns[k].toggleClass('is-on', !!st[k]);
     if (this.chevEl) this.chevEl.setText(st.sessionsOpen === false ? '›' : '⌄');
@@ -1739,6 +1825,13 @@ class BrainView extends ItemView {
     if (key === 'showRegions') this.renderRegions();
   }
 
+  setLook(v, say) {
+    this.plugin.settings.look = v === 'atlas' ? 'atlas' : 'anatomy';
+    this.plugin.saveAll();
+    this.plugin.forEachView(w => { w.needsDraw = true; if (w.renderLookUi) w.renderLookUi(); });
+    if (say) this.flash(v === 'atlas' ? 'Atlas look: see-through brain' : 'Anatomy look');
+  }
+  renderLookUi() { for (const [v, b] of this.lookBtns || []) b.toggleClass('is-on', (this.plugin.settings.look || 'anatomy') === v); }
   togglePop(which, force) {
     const el = which === 'layers' ? this.layersEl : this.sliceEl;
     if (!el) return;
@@ -1820,6 +1913,7 @@ class BrainView extends ItemView {
       else if (k === 'i') this.toggleInfo();
       else if (k === 'l') this.togglePop('layers');
       else if (k === 'm') this.toggleSlice();
+      else if (k === 'v') this.setLook(this.plugin.settings.look === 'atlas' ? 'anatomy' : 'atlas', true);
       else if (k === ' ') { if (this.frozen) this.setTimeScale(this.timeScale && this.timeScale < 1 ? this.timeScale : 1); else this.setTimeScale(0); }
       else if (k === ',' || k === '.') this.setTimeScale(k === ',' ? ((this.timeScale || 1) <= 0.1 ? 0.1 : (this.timeScale || 1) <= 0.25 ? 0.1 : 0.25) : ((this.timeScale || 1) >= 0.25 ? 1 : 0.25));
       else if (k === 'f') { this.plugin.settings.follow = !this.plugin.settings.follow; this.plugin.saveAll(); this.flash(this.plugin.settings.follow ? 'Following activity' : 'Not following activity'); }
@@ -1852,7 +1946,7 @@ class BrainView extends ItemView {
     const el = this.frozenEl; if (!el) return;
     el.empty();
     const n = (this.tractSpikes || []).length + this.spikes.length;
-    el.createSpan({ cls: 'cb-fz-t', text: this.frozen ? (n ? `Frozen · ${n} signal${n === 1 ? '' : 's'} in flight. Point at one to see what it carries, click it for its operation tree.` : 'Frozen · nothing is travelling right now.') : 'Slow motion · point at a signal, click to stop and open it.' });
+    el.createSpan({ cls: 'cb-fz-t', text: this.frozen ? (n ? `Frozen · ${n} signal${n === 1 ? '' : 's'} in flight. Point at one to see what it carries, click it for everything about it.` : 'Frozen · nothing is travelling right now.') : 'Slow motion · point at a signal, click to stop and open it.' });
     const seg = el.createDiv({ cls: 'cb-seg' });
     for (const [v, l] of [[0, 'Stop'], [0.1, '0.1×'], [0.25, '0.25×'], [1, 'Live']]) {
       const b = seg.createEl('button', { cls: 'cb-tl-btn' + ((v === 0 ? this.frozen : !this.frozen && (this.timeScale || 1) === v) ? ' is-on' : ''), text: l });
@@ -1928,7 +2022,10 @@ class BrainView extends ItemView {
     const l2 = this.tipEl.createDiv({ cls: 'cb-tip-2' });
     if (d.who) { const w = l2.createSpan({ cls: 'cb-tip-who', text: d.who + (d.agent ? ' › ' + d.agent : '') }); w.style.color = d.color; }
     l2.appendText((d.who ? ' · ' : '') + [d.where, d.target && (d.where === 'result going back' ? 'from ' : 'to ') + d.target].filter(Boolean).join(' '));
-    if (d.fibre) this.tipEl.createDiv({ cls: 'cb-tip-3', text: 'via ' + d.fibre + (h.sp.src && (h.sp.src.sid || h.sp.src.rec) ? ' · click for its operation tree' : '') });
+    const rc = h.sp.src && h.sp.src.rec, dd = rc ? this.plugin.detailOf(rc) : null, ti = dd && dd.ev && dd.ev.tool_input;
+    if (d.fibre || rc) this.tipEl.createDiv({ cls: 'cb-tip-3', text: [d.fibre && 'via ' + d.fibre, h.sp.src && (h.sp.src.sid || rc) ? 'click for everything about it' : ''].filter(Boolean).join(' · ') });
+    const line = ti ? ti.command || ti.file_path || ti.notebook_path || ti.url || ti.query || ti.pattern || ti.description || '' : '';
+    if (line) this.tipEl.createDiv({ cls: 'cb-tip-4', text: (ti.command ? '$ ' : '') + clip(String(line), 160) });
     this.tipEl.style.left = Math.min(this.cssW - 320, sx + 16) + 'px';
     this.tipEl.style.top = (sy + 14) + 'px';
     this.tipEl.addClass('is-on');
@@ -1985,6 +2082,282 @@ class BrainView extends ItemView {
     agents.set(r.aid, g); root.children.push(g); return g;
   }
 
+  // a record as a header, when the panel shows one that no spike carries
+  describeRec(r) {
+    if (!r) return { tag: 'SIGNAL', what: '', who: '', color: SIGNAL, where: '', target: '', fibre: '', agent: '' };
+    const s = this.plugin.sessions.get(r.sid);
+    const st = r.strikes && r.strikes[0];
+    const tag = r.e === 'PreToolUse' ? (CAT[r.cat] || CAT.other).tag : ({ UserPromptSubmit: 'PROMPT', Stop: 'DONE', StopFailure: 'ERROR', SessionStart: 'WAKE', SubagentStart: 'AGENT', SubagentStop: 'AGENT', Message: 'WROTE', PostToolUse: 'RESULT', PostToolUseFailure: 'FAIL', PermissionDenied: 'DENIED', PermissionRequest: 'WAIT', Notification: 'WAIT', PreCompact: 'MEMORY', PostCompact: 'MEMORY', InstructionsLoaded: 'RECALL', TaskCreated: 'PLAN', TaskCompleted: 'DONE' }[r.e] || String(r.e || 'event').toUpperCase().slice(0, 10));
+    const color = r.e === 'PreToolUse' ? catColor(r.cat) : /Failure|Denied/.test(r.e) ? ERR : r.color || SIGNAL;
+    const what = r.e === 'PreToolUse' ? (r.text || r.tool) : r.e === 'SubagentStart' || r.e === 'SubagentStop' ? (r.agent || 'agent') + (r.e === 'SubagentStart' ? ' started' : ' finished')
+      : r.e === 'UserPromptSubmit' ? 'Your prompt' : r.e === 'Message' ? 'Claude wrote ' + (r.text || 'a reply') : r.e === 'PostToolUse' ? (r.tool || 'tool') + ' result' : r.e === 'PostToolUseFailure' ? (r.tool || 'tool') + ' failed' : r.text || r.e;
+    return { tag, what, who: r.label || (s ? this.plugin.sessionLabel(s) : ''), color, where: hhmm(r.t, true), target: st ? aalName(st.label) : '', fibre: '', agent: r.agent || '' };
+  }
+  // the records of one tool call: the call itself, approval prompts, and its result
+  callRecs(rec) {
+    const H = this.plugin.history, out = { pre: rec && rec.e === 'PreToolUse' ? rec : null, post: null, perm: [] };
+    if (!rec || !rec.id) return out;
+    for (let i = H.length - 1; i >= 0; i--) {
+      const r = H[i];
+      if (r.id !== rec.id || r.sid !== rec.sid) continue;
+      if (r.e === 'PreToolUse') out.pre = r;
+      else if (/^(PostToolUse|PostToolUseFailure|PermissionDenied)$/.test(r.e)) { if (!out.post) out.post = r; }
+      else if (r.e === 'PermissionRequest') out.perm.unshift(r);
+    }
+    if (out.pre && !out.perm.length) {
+      // approval prompts don't always carry the call's id: take the one for the same tool while it was waiting
+      const end = out.post ? out.post.t : Infinity;
+      for (const r of H) if (r.sid === rec.sid && r.e === 'PermissionRequest' && !r.id && r.tool === out.pre.tool && (r.aid || '') === (out.pre.aid || '') && r.t >= out.pre.t && r.t <= end) out.perm.push(r);
+    }
+    return out;
+  }
+  findRec(sid, test) { const H = this.plugin.history; for (let i = H.length - 1; i >= 0; i--) if (H[i].sid === sid && test(H[i])) return H[i]; return null; }
+  goDetail(r) {
+    const P = this.panel;
+    if (!P || P.kind !== 'signal' || !r) return;
+    const cur = P.sel || P.rec || (P.h && P.h.sp.src && P.h.sp.src.rec) || null;
+    if (cur && cur !== r) (P.stack || (P.stack = [])).push(cur);
+    P.sel = r; P.tab = 'detail';
+    this.renderPanel(true);
+    window.requestAnimationFrame(() => { this.panelEl.scrollTop = 0; });
+  }
+  // everything known about one record: who ran it, why, where it went, every parameter, the result, the raw hook events
+  renderDetail(el, rec, P, H) {
+    const p = this.plugin, { sec, row, kv, openFile } = H, now = Date.now();
+    const open = P.open || (P.open = new Set());
+    const set = this.callRecs(rec), pre = set.pre, post = set.post;
+    const D = p.detailOf(rec), Dpre = pre ? p.detailOf(pre) : null, Dpost = post ? p.detailOf(post) : null;
+    const ev = (Dpre && Dpre.ev) || (D && D.ev) || null;
+    const isCall = !!pre || /^(PreToolUse|PostToolUse|PostToolUseFailure|PermissionRequest|PermissionDenied)$/.test(rec.e);
+    const ti = (ev && ev.tool_input) || {};
+    const tool = (pre && pre.tool) || rec.tool || (ev && ev.tool_name) || '';
+    const block = (label, text, o) => {
+      o = o || {};
+      text = String(text == null ? '' : text);
+      if (!text.trim() && !o.keepEmpty) return null;
+      const key = rec.t + '|' + rec.e + '|' + label;
+      const max = o.lines != null ? o.lines : 8, chars = o.chars != null ? o.chars : 700, lines = text.split('\n'), long = lines.length > max || text.length > chars;
+      const isOpen = open.has(key) || !long;
+      const b = el.createDiv({ cls: 'cb-d-blk' + (o.cls ? ' ' + o.cls : '') });
+      const hd = b.createDiv({ cls: 'cb-d-bh' });
+      hd.createSpan({ cls: 'cb-d-bl', text: label });
+      if (o.note) hd.createSpan({ cls: 'cb-d-bn', text: o.note });
+      const acts = hd.createSpan({ cls: 'cb-d-acts' });
+      if (long) {
+        const t = acts.createEl('button', { cls: 'cb-d-act', text: isOpen ? 'Less' : lines.length > max ? `All ${lines.length} lines` : `All ${text.length.toLocaleString('en-US')} characters` });
+        t.addEventListener('click', () => { if (open.has(key)) open.delete(key); else open.add(key); this.renderPanel(true); });
+      }
+      const c = acts.createEl('button', { cls: 'cb-d-act', text: 'Copy' });
+      c.addEventListener('click', () => { navigator.clipboard.writeText(o.copy != null ? o.copy : text); this.flash('Copied ' + label.toLowerCase()); });
+      if (!isOpen && (!max || !chars)) { b.addClass('is-shut'); return b; }
+      const pr = b.createEl('pre', { cls: 'cb-d-pre' + (isOpen ? '' : o.tail ? ' is-clip is-tail' : ' is-clip') });
+      if (isOpen) pr.setText(text);
+      else if (o.tail) pr.setText('…' + lines.slice(-max).join('\n').slice(-chars));
+      else pr.setText(lines.slice(0, max).join('\n').slice(0, chars));
+      return b;
+    };
+    const json = (v) => { try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); } };
+    const field = (k, v) => {
+      if (typeof v === 'string') {
+        if (k === 'old_string' || k === 'new_string') return block(k, v, { cls: k === 'old_string' ? 'is-old' : 'is-new', keepEmpty: true });
+        if (v.length <= 90 && !v.includes('\n') && k !== 'command' && k !== 'prompt' && k !== 'content') return kv(k, v, { mono: true });
+        return block(k, v, { lines: k === 'command' ? 30 : 8 });
+      }
+      if (v == null || typeof v !== 'object') return kv(k, String(v), { mono: true });
+      if (k === 'todos' && Array.isArray(v)) return block('todos', v.map(t => (t && t.status === 'completed' ? '✓ ' : t && t.status === 'in_progress' ? '▸ ' : '· ') + (t && (t.content || t.subject) || '')).join('\n'), { copy: json(v) });
+      return block(k, json(v));
+    };
+    const fields = (obj, skip) => { for (const k of Object.keys(obj || {})) if (!skip || !skip.has(k)) field(k, obj[k]); };
+    const status = isCall ? (post ? (post.e === 'PostToolUse' ? 'ok' : post.e === 'PermissionDenied' ? 'denied' : 'fail') : set.perm.length ? 'wait' : 'run') : '';
+    const s = p.sessions.get(rec.sid);
+
+    // ---- what and when
+    sec(isCall ? 'Call' : 'Event', hhmm(rec.t, true));
+    if (isCall) {
+      kv('Tool', toolLabel(tool) + (tool.startsWith('mcp__') ? '  (' + tool + ')' : ''));
+      const st = { ok: `✓ finished in ${post ? fmtDur(post.t - (pre || rec).t) : ''}`, fail: '✗ failed' + (post ? ` after ${fmtDur(post.t - (pre || rec).t)}` : ''), denied: '✗ denied', wait: '◆ waiting for your approval', run: `▸ running for ${fmtDur(now - (pre || rec).t)}` }[status];
+      kv('Status', st, { color: status === 'ok' ? '#7fdca4' : status === 'run' ? '#c9d1dc' : status === 'wait' ? WAIT : ERR });
+      if (pre && pre.id) kv('Call id', pre.id, { mono: true, click: () => { navigator.clipboard.writeText(pre.id); this.flash('Call id copied'); }, tip: 'Copy' });
+    } else kv('Event', rec.e);
+    if (!D && !Dpre && !Dpost) {
+      row('is-empty').setText(p.settings.callDetails === false ? 'Full call details are off (Settings → Inspector).' : 'The full details of this event are no longer kept (memory budget), or it came from a server\'s offline queue, which keeps only short labels.');
+    }
+
+    if (!isCall && D && D.ev) {
+      const e0 = D.ev;
+      if (rec.e === 'UserPromptSubmit' && e0.prompt) block('Your prompt', e0.prompt, { lines: 14 });
+      if (rec.e === 'Message' && e0.text) block('Claude wrote', e0.text, { lines: 14 });
+      if ((rec.e === 'SubagentStop' || rec.e === 'Stop') && e0.last_assistant_message) block(rec.e === 'Stop' ? 'Claude\'s last message' : 'The agent\'s final report', e0.last_assistant_message, { lines: 14 });
+    }
+    // ---- who
+    sec('Who');
+    kv('Session', rec.label || (s ? p.sessionLabel(s) : rec.sid), { color: rec.color });
+    kv('Machine', !rec.src || rec.src === 'local' ? 'this computer' : rec.src);
+    const ag = (Dpre && Dpre.agent) || (D && D.agent) || null;
+    if (rec.aid || ag) {
+      // the agent chain: main › agent › agent
+      const chain = [];
+      let cur = ag, guard = 0;
+      while (cur && guard++ < 6) {
+        chain.unshift((cur.type || 'agent') + (cur.wf ? ' (workflow)' : ''));
+        if (!cur.parent) break;
+        const pr = this.findRec(rec.sid, r => r.aid === cur.parent);
+        const pd = pr ? p.detailOf(pr) : null;
+        cur = pd && pd.agent ? pd.agent : pr ? { type: pr.agent, parent: '' } : null;
+      }
+      chain.unshift('main');
+      kv('Agent', chain.join(' › '));
+      kv('Agent id', (ag && ag.id) || rec.aid, { mono: true });
+      const spawnId = ag && ag.spawn;
+      const spawn = spawnId ? this.findRec(rec.sid, r => r.e === 'PreToolUse' && r.id === spawnId) : null;
+      if (spawn) kv('Started by', (spawn.aid ? spawn.agent + ': ' : 'main: ') + (spawn.text || spawn.tool), { click: () => this.goDetail(spawn), tip: 'Show that call' });
+      else if (ag && ag.desc) kv('Started for', ag.desc);
+    } else kv('Agent', 'main');
+    const cwd = (ev && ev.cwd) || rec.cwd;
+    if (cwd) kv('Folder', cwd, { mono: true, click: () => { navigator.clipboard.writeText(cwd); this.flash('Folder copied'); }, tip: 'Copy' });
+    if (Dpre && Dpre.mode) kv('Permissions', Dpre.mode);
+    for (const pr of set.perm) kv('Approval', `asked you at ${hhmm(pr.t, true)}` + (post && post.e !== 'PermissionDenied' ? ', approved' : post ? ', denied' : ''), { color: WAIT });
+
+    // ---- why
+    const spawnOf = (a) => a && a.spawn ? this.findRec(rec.sid, r => r.e === 'PreToolUse' && r.id === a.spawn) : null;
+    const desc = typeof ti.description === 'string' ? ti.description : '';
+    const said = Dpre && Dpre.said;
+    const step = Dpre && Dpre.step;
+    const spawnRec = spawnOf(ag), spawnD = spawnRec ? p.detailOf(spawnRec) : null;
+    const task = spawnD && spawnD.ev && spawnD.ev.tool_input ? spawnD.ev.tool_input.prompt : '';
+    const promptRec = this.findRec(rec.sid, r => r.e === 'UserPromptSubmit' && r.t <= rec.t);
+    const promptD = promptRec ? p.detailOf(promptRec) : null;
+    const prompt = promptD && promptD.ev ? promptD.ev.prompt : '';
+    if (isCall && (desc || said || step || task || prompt)) {
+      sec('Why');
+      if (desc) kv('Its own words', desc);
+      if (step) kv('Plan step', step);
+      if (said) block('Claude said just before', said, { tail: true, lines: 6 });
+      if (task) block(`Task given to ${ag.type || 'this agent'}`, task, { lines: 6 });
+      if (prompt && promptRec !== rec) block('Your request (this turn)', prompt, { lines: 4, note: hhmm(promptRec.t) });
+    }
+
+    // ---- where it goes
+    if (isCall) {
+      sec('Where it goes');
+      const fp = ti.file_path || ti.notebook_path;
+      if (fp) {
+        const rel = p.toVaultRel(fp, cwd);
+        kv('File', fp, { mono: true, click: () => openFile(rel && this.byPath.get(rel) ? rel : fp), tip: rel ? 'Open the note' : 'Copy the path' });
+        if (rel) kv('In your vault', rel || '/');
+      }
+      if (tool === 'Grep' || tool === 'Glob') {
+        kv('Looks for', ti.pattern, { mono: true });
+        kv('In', ti.path || cwd || '', { mono: true });
+        if (ti.glob || ti.type) kv('Only', ti.glob || ti.type, { mono: true });
+      } else if (ti.path && !fp) kv('Path', ti.path, { mono: true });
+      if (ti.url) { kv('Address', ti.url, { mono: true, click: () => { navigator.clipboard.writeText(ti.url); this.flash('Address copied'); }, tip: 'Copy' }); try { kv('Host', new URL(ti.url).hostname, { mono: true }); } catch (e) { /* not a URL */ } }
+      if (tool === 'WebSearch') { kv('Searches the web for', ti.query); if (ti.allowed_domains) kv('Only on', [].concat(ti.allowed_domains).join(', ')); if (ti.blocked_domains) kv('Never on', [].concat(ti.blocked_domains).join(', ')); }
+      if ((tool === 'Bash' || tool === 'PowerShell') && ti.command) {
+        const parts = tool === 'Bash' ? bashParts(String(ti.command), 14) : [{ cat: evCat({ tool_name: tool, tool_input: ti }), cmd: String(ti.command).trim().split(/\s+/)[0] }];
+        if (parts.length) {
+          const r = row('cb-d-steps'); r.createSpan({ cls: 'cb-p-k', text: parts.length > 1 ? 'Steps' : 'Program' });
+          const box = r.createSpan({ cls: 'cb-p-x' });
+          parts.forEach((pt, i) => {
+            if (i) box.createSpan({ cls: 'cb-d-arrow', text: '→' });
+            const c = box.createSpan({ cls: 'cb-d-chip', text: pt.cmd || pt.cat }); c.style.borderColor = catColor(pt.cat); c.setAttr('title', (CAT[pt.cat] || CAT.other).tag.toLowerCase() + ': ' + LOBES[(CAT[pt.cat] || CAT.other).lobe].fn);
+          });
+        }
+        const names = { url: 'Web address', host: 'Remote host', git: 'Git remote', writes: 'Writes to', cd: 'Moves to', as: 'Runs as' };
+        for (const [k, v] of shellTargets(ti.command)) kv(names[k] || k, v, { mono: true });
+        if (ti.run_in_background) kv('Runs', 'in the background');
+        if (ti.timeout) kv('Time limit', fmtDur(Number(ti.timeout)));
+      }
+      if (tool.startsWith('mcp__')) { const [, server, ...rest] = tool.split('__'); kv('MCP server', server, { mono: true }); kv('MCP tool', rest.join('__'), { mono: true }); }
+      if (/^(Agent|Task)$/.test(tool)) {
+        const st0 = String(ti.subagent_type || 'general-purpose');
+        kv('Starts', `${/^[aeiou]/i.test(st0) ? 'an' : 'a'} ${st0} subagent` + (ti.model ? ` on ${ti.model}` : '') + (ti.run_in_background ? ', in the background' : ''));
+        const callId = pre && pre.id;
+        const startRec = callId ? this.findRec(rec.sid, r => r.e === 'SubagentStart' && (p.detailOf(r) || {}).agent && p.detailOf(r).agent.spawn === callId) : null;
+        if (startRec) {
+          const n = p.history.filter(r => r.sid === rec.sid && r.aid === startRec.aid && r.e === 'PreToolUse').length;
+          kv('Its agent', `${startRec.agent || 'agent'} · ${n} tool call${n === 1 ? '' : 's'} so far`, { click: () => this.goDetail(startRec), tip: 'Show the agent' });
+        }
+      }
+      if (tool === 'Workflow') kv('Starts', 'workflow ' + workflowName(ti));
+      if (tool === 'Skill') kv('Skill', ti.skill || ti.name || ti.command, { mono: true });
+    }
+    // where it lands in the brain, and why there
+    const strikes = (pre && pre.strikes && pre.strikes.length ? pre.strikes : rec.strikes) || [];
+    if (strikes.length) {
+      sec('In the brain', strikes.length > 1 ? strikes.length + ' places' : '');
+      const G = p.geo, kinds = [];
+      for (const st of strikes.slice(0, 10)) {
+        const r = row('cb-d-route');
+        const t = r.createSpan({ cls: 'cb-p-tag', text: KIND_TAG[st.kind] || st.kind }); t.style.color = st.hex || SIGNAL;
+        const via = st.fibre && G && G.bundleOf ? G.bundleOf[st.fibre.i] : '';
+        r.createSpan({ cls: 'cb-p-x', text: aalName(st.label) + (st.nucleus ? ' + ' + st.nucleus.toLowerCase() : '') + (via ? ', via the ' + bundleName(via) : '') + (st.what && strikes.length > 1 ? '  ·  ' + st.what : '') });
+        if (!kinds.includes(st.kind)) kinds.push(st.kind);
+      }
+      for (const k of kinds) if (KIND_WHY[k]) row('cb-d-why').setText(KIND_WHY[k]);
+    }
+
+    // ---- parameters: every field the tool was called with
+    if (isCall && ev && ev.tool_input && typeof ev.tool_input === 'object') {
+      const n = Object.keys(ev.tool_input).length;
+      const h = sec('Parameters', '');
+      const cp = h.createEl('button', { cls: 'cb-d-act', text: `Copy JSON (${n} field${n === 1 ? '' : 's'})` });
+      cp.addEventListener('click', () => { navigator.clipboard.writeText(json(ev.tool_input)); this.flash('Parameters copied'); });
+      if (!n) row('is-empty').setText('No parameters.');
+      fields(ev.tool_input);
+    }
+
+    // ---- what the event itself carried (prompts, replies, agents, notifications)
+    if (!isCall && D && D.ev) {
+      const e = D.ev, common = new Set(['session_id', 'transcript_path', 'cwd', 'hook_event_name', 'permission_mode', 'agent_id', 'agent_type']);
+      if (rec.e === 'SubagentStart' || rec.e === 'SubagentStop') {
+        const calls = p.history.filter(r => r.sid === rec.sid && r.aid === rec.aid && r.e === 'PreToolUse');
+        if (calls.length) {
+          sec('Its calls', String(calls.length));
+          for (const c of calls.slice(-40)) { const r = row('is-click cb-p-ev'); r.createSpan({ cls: 'cb-p-t', text: hhmm(c.t, true) }); const t = r.createSpan({ cls: 'cb-p-tag', text: (CAT[c.cat] || CAT.other).tag.toLowerCase() }); t.style.color = catColor(c.cat); r.createSpan({ cls: 'cb-p-x', text: c.text || c.tool }); r.addEventListener('click', () => this.goDetail(c)); }
+        }
+      }
+      const skip = new Set([...common, 'prompt', 'text', 'last_assistant_message']);
+      if (Object.keys(e).some(k => !skip.has(k))) { sec('Fields'); fields(e, skip); }
+    }
+
+    // ---- result
+    if (isCall) {
+      sec('Result', post ? hhmm(post.t, true) : '');
+      if (!post) row('is-empty').setText(status === 'wait' ? 'Waiting for your approval.' : 'Still running. The result shows here when it comes back.');
+      else if (!Dpost) row('is-empty').setText(post.e === 'PostToolUse' ? `Finished${post.size ? `, about ${post.size.toLocaleString('en-US')} characters of output` : ''}. The output itself is no longer kept.` : 'Failed. The error text is no longer kept.');
+      else {
+        const e = Dpost.ev || {};
+        if (post.e === 'PostToolUseFailure') { block('Error', e.error || e.message || 'failed', { cls: 'is-err', lines: 12 }); if (e.is_interrupt) kv('Interrupted', 'yes, by you'); }
+        if (post.e === 'PermissionDenied') kv('Denied', e.reason || e.message || 'the call was not allowed', { color: ERR });
+        const r = e.tool_response;
+        if (typeof r === 'string') block('Output', r, { lines: 14 });
+        else if (r && typeof r === 'object') {
+          const shown = new Set();
+          for (const k of ['stdout', 'stderr', 'output', 'result', 'content', 'text', 'error']) {
+            if (typeof r[k] === 'string' && r[k].trim()) { block(k, r[k], { lines: 14, cls: k === 'stderr' || k === 'error' ? 'is-err' : '' }); shown.add(k); }
+          }
+          if (r.file && typeof r.file === 'object') {
+            if (r.file.numLines != null) kv('Lines', `${r.file.numLines}${r.file.totalLines ? ' of ' + r.file.totalLines : ''}${r.file.startLine > 1 ? ', from line ' + r.file.startLine : ''}`);
+            if (typeof r.file.content === 'string') block('content', r.file.content, { lines: 10 });
+          }
+          if (r.interrupted) kv('Interrupted', 'yes');
+          if (r.returnCodeInterpretation) kv('Exit', r.returnCodeInterpretation);
+          if (Array.isArray(r.content)) block('content', r.content.map(c => c && typeof c === 'object' ? (c.text != null ? c.text : json(c)) : String(c)).join('\n'), { lines: 14 });
+          block('Full response', json(r), { lines: 3 });
+        }
+        if (!r && post.e === 'PostToolUse') row('is-empty').setText('Finished. Claude Code sent no output for this call.');
+      }
+    }
+
+    // ---- the raw hook events, exactly as kept
+    const raws = (isCall ? [pre, ...set.perm, post] : [rec]).filter(Boolean).map(r => [r, p.detailOf(r)]).filter(x => x[1] && x[1].ev);
+    if (raws.length) {
+      sec('Raw hook events', 'as Claude Code sent them');
+      for (const [r, d] of raws) block(`${r.e} · ${hhmm(r.t, true)}`, json(d.ev), { lines: 0, chars: 0 });
+    }
+  }
+
   toggleFocus(sid) {
     if (this.mini) { this.plugin.activateView(); return; }
     if (this.focusSid === sid) { this.focusSid = null; if (this.panel && this.panel.kind === 'session') this.closePanel(); }
@@ -1993,6 +2366,7 @@ class BrainView extends ItemView {
     this.requestHud();
   }
 
+  panelWidth() { return !this.panel || this.mini ? 0 : this.contentEl.hasClass('cb-panel-wide') ? Math.min(560, (this.cssW || 800) - 24) : 330; }
   togglePanel(p) {
     if (this.panel && this.panel.kind === p.kind && this.panel.id === p.id && this.panel.aal === p.aal) this.closePanel(); else this.openPanel(p);
   }
@@ -2000,7 +2374,8 @@ class BrainView extends ItemView {
     if (this.mini) return;
     this.panel = p;
     this.applyLayout();
-    this.renderPanel();
+    this.renderPanel(true);
+    window.requestAnimationFrame(() => { if (this.panelEl) this.panelEl.scrollTop = 0; });
   }
   closePanel() {
     if (this.panel && this.panel.kind === 'session') this.focusSid = null;
@@ -2010,9 +2385,19 @@ class BrainView extends ItemView {
     this.requestHud();
   }
 
-  renderPanel() {
+  // force: re-render even when nothing it shows has changed (the call inspector otherwise keeps still, so you can
+  // select and copy from it while events stream in)
+  renderPanel(force) {
     const el = this.panelEl, P = this.panel, p = this.plugin, now = Date.now();
     if (!el || !P) return;
+    if (P.kind === 'signal') {
+      const sel = P.sel || P.rec || (P.h && P.h.sp.src && P.h.sp.src.rec) || null, cs = sel ? this.callRecs(sel) : null;
+      const sig = [P.tab, sel ? sel.t + sel.e : '', cs && cs.post ? cs.post.e : '', cs ? cs.perm.length : 0, P.tab === 'tree' ? p.history.length : 0, sel && p.detailOf(sel) ? 1 : 0, (P.stack || []).length].join('|');
+      if (!force && sig === P._sig && !(cs && cs.pre && !cs.post)) return;
+      if (!force && sig === P._sig && el.contains(document.activeElement)) return;
+      if (!force && sig === P._sig && window.getSelection && String(window.getSelection()).length) return;
+      P._sig = sig;
+    }
     const keepScroll = el.scrollTop;
     window.requestAnimationFrame(() => { el.scrollTop = keepScroll; });
     el.empty();
@@ -2035,7 +2420,8 @@ class BrainView extends ItemView {
       if (withSession) { const w = d.createSpan({ cls: 'cb-p-who', text: r.label + (r.agent ? ' › ' + r.agent : '') }); w.style.color = r.color; }
       else if (r.agent) { const w = d.createSpan({ cls: 'cb-p-who', text: r.agent }); w.style.color = r.color; }
       d.createSpan({ cls: 'cb-p-x', text: r.text || ({ SubagentStart: 'Started', SubagentStop: 'Finished', Stop: 'Finished, your turn', UserPromptSubmit: 'New prompt', SessionStart: 'Session started', SessionEnd: 'Session ended', PostToolUseFailure: (r.tool || 'Tool') + ' failed', PreCompact: 'Compacting context' }[r.e] || '') });
-      if (r.file) { d.addClass('is-click'); d.addEventListener('click', () => { const rel = p.toVaultRel(r.file, r.cwd); openFile(rel && this.byPath.get(rel) ? rel : r.file); }); }
+      d.addClass('is-click'); d.setAttr('title', 'Show everything about it');
+      d.addEventListener('click', () => this.openPanel({ kind: 'signal', rec: r, tab: 'detail', back: Object.assign({}, this.panel) }));
     };
 
     if (P.kind === 'session') {
@@ -2095,41 +2481,69 @@ class BrainView extends ItemView {
     }
 
     if (P.kind === 'signal') {
-      const h = P.h, d = this.describeSpike(h), src = h.sp.src || {};
+      const h = P.h || null, src = h ? h.sp.src || {} : {}, rec0 = src.rec || P.rec || null;
+      const sel = P.sel || rec0, onSignal = !!h && sel === rec0;
+      const d = onSignal || !sel ? (h ? this.describeSpike(h) : this.describeRec(null)) : this.describeRec(sel);
+      const sid = src.sid || (sel && sel.sid) || (rec0 && rec0.sid);
+      if (!P.tab) P.tab = 'detail';
       const title = head.createDiv({ cls: 'cb-p-title' });
       const dot = title.createSpan({ cls: 'cb-p-dot' }); dot.style.background = d.color;
       const tg = title.createSpan({ cls: 'cb-p-tagb', text: d.tag }); tg.style.color = d.color;
-      title.createSpan({ text: ' ' + clip(d.what, 48) });
-      head.createDiv({ cls: 'cb-p-sub', text: [d.who && d.who + (d.agent ? ' › ' + d.agent : ''), d.where, d.target && (h.sp.back ? 'from ' : 'to ') + d.target].filter(Boolean).join(' · ') });
-      sec('This signal');
-      const kv = (k, v) => { if (!v) return; const r = row(); r.createSpan({ cls: 'cb-p-k', text: k }); r.createSpan({ cls: 'cb-p-x', text: v }); };
-      const rec = src.rec;
-      if (rec) kv('When', hhmm(rec.t, true));
-      if (h.kind === 'tract') kv('Pathway', bundleName(h.sp.l.bundle) + (h.sp.back ? ', travelling back' : ''));
-      if (src.st) kv('Lands in', aalName(src.st.label) + (src.st.nucleus ? ' and the ' + src.st.nucleus.toLowerCase() : ''));
-      if (src.st) kv('Kind of work', (KIND_TAG[src.st.kind] || src.st.kind) + (src.st.what ? ' · ' + src.st.what : ''));
-      if (rec && rec.e === 'PreToolUse') { const post = rec.id && p.history.find(r2 => r2.id === rec.id && r2 !== rec && /^Post/.test(r2.e)); kv('Status', post ? (post.e === 'PostToolUse' ? `finished in ${fmtDur(post.t - rec.t)}` : 'failed') : 'still running'); }
-      if (src.type === 'think') { const M = p.metab.get(src.sid); kv('What it is', 'One of the spikes that keep circulating through prefrontal loops while the model deliberates.'); if (M && M.calls) kv('Energy so far', `${M.calls} model calls · ${fmtTok(M.outTok)} tokens written · working memory ${fmtTok(M.ctx)}`); }
-      if (src.type === 'body') { const V = p.vitals.get(src.machine || 'local'); kv('What it is', 'A body signal from the machine, not from Claude.'); if (V) kv('Now', `cpu ${Math.round((V.cpu || 0) * 100)}% · memory ${Math.round((V.mem || 0) * 100)}%` + (V.rx != null ? ` · network ${fmtRate((V.rx || 0) + (V.tx || 0))}` : '')); }
-      if (src.type === 'dream') kv('What it is', 'A replay while nothing runs. The original happened at ' + hhmm(src.t) + '.');
-      if (h.kind === 'note') { kv('From', h.sp.a.name); kv('To', h.sp.b.name); }
-      const sid = src.sid || (rec && rec.sid);
-      const tree = sid ? this.turnTree(sid, rec ? rec.t : Date.now()) : null;
-      if (tree) {
-        sec('Operation tree', 'click a line to replay it');
+      title.createSpan({ text: ' ' + clip(d.what, 72) });
+      head.createDiv({ cls: 'cb-p-sub', text: [d.who && d.who + (d.agent ? ' › ' + d.agent : ''), d.where, d.target && (h && h.sp.back && onSignal ? 'from ' : 'to ') + d.target].filter(Boolean).join(' · ') });
+      const nav = head.createDiv({ cls: 'cb-p-tabs' });
+      if ((P.stack && P.stack.length) || P.back) {
+        const bk = nav.createEl('button', { cls: 'cb-p-tabb cb-p-backb', text: '‹ Back' });
+        bk.addEventListener('click', () => { if (P.stack && P.stack.length) { P.sel = P.stack.pop(); P.tab = 'detail'; this.renderPanel(true); } else this.openPanel(P.back); });
+      }
+      const tab = (k, label) => { const b = nav.createEl('button', { cls: 'cb-p-tabb' + (P.tab === k ? ' is-on' : ''), text: label }); b.addEventListener('click', () => { P.tab = k; this.renderPanel(true); }); };
+      tab('detail', 'Details');
+      if (sid) tab('tree', 'Operation tree');
+      if (sel && sel.strikes && sel.strikes.length) { const rp = nav.createEl('button', { cls: 'cb-p-tabb', text: '↻ Replay' }); rp.setAttr('title', 'Play this action again on the brain'); rp.addEventListener('click', () => this.replayStrikes(sel)); }
+      const kv = (k, v, o) => {
+        if (v == null || v === '') return null;
+        o = o || {};
+        const r = row(o.cls || ''); r.createSpan({ cls: 'cb-p-k', text: k });
+        const x = r.createSpan({ cls: 'cb-p-x' + (o.mono ? ' is-mono' : ''), text: String(v) });
+        if (o.color) x.style.color = o.color;
+        if (o.click) { r.addClass('is-click'); r.addEventListener('click', o.click); if (o.tip) r.setAttr('title', o.tip); }
+        return r;
+      };
+      if (P.tab === 'tree' && sid) {
+        const tree = this.turnTree(sid, sel ? sel.t : rec0 ? rec0.t : Date.now());
+        if (!tree) { row('is-empty').setText('Nothing recorded for this turn.'); return; }
+        sec('Operation tree', 'click a line for its details');
         const walk = (n, depth, last, pre) => {
-          const r = row('cb-p-tree' + (rec && n.r === rec ? ' is-sel' : '') + (n.r && n.r.strikes && n.r.strikes.length ? ' is-click' : ''));
+          const r = row('cb-p-tree' + (sel && n.r === sel ? ' is-sel' : '') + (n.r ? ' is-click' : ''));
           r.createSpan({ cls: 'cb-p-tr', text: depth ? pre + (last ? '└ ' : '├ ') : '' });
-          const ic = r.createSpan({ cls: 'cb-p-st is-' + n.status, text: { ok: '✓', fail: '✗', run: '▸', wait: '◆' }[n.status] || '·' });
+          r.createSpan({ cls: 'cb-p-st is-' + n.status, text: { ok: '✓', fail: '✗', run: '▸', wait: '◆' }[n.status] || '·' });
           const tg2 = r.createSpan({ cls: 'cb-p-tag', text: KIND_TAG[n.kind] || n.kind }); tg2.style.color = n.status === 'fail' ? ERR : CAT[n.kind] ? catColor(n.kind) : KIND_HEX[n.kind] || '#8b93a1';
           r.createSpan({ cls: 'cb-p-x', text: n.label });
           r.createSpan({ cls: 'cb-p-t', text: n.dur ? fmtDur(n.dur) : n.r && !n.part ? hhmm(n.r.t) : '' });
-          if (n.r && n.r.strikes && n.r.strikes.length) r.addEventListener('click', () => this.replayStrikes(n.r));
+          if (n.r && n.r.strikes && n.r.strikes.length) {
+            const rp = r.createSpan({ cls: 'cb-p-rep', text: '↻' }); rp.setAttr('title', 'Replay on the brain');
+            rp.addEventListener('click', (e) => { e.stopPropagation(); this.replayStrikes(n.r); });
+          }
+          if (n.r) r.addEventListener('click', () => this.goDetail(n.r));
           n.children.forEach((c, i) => walk(c, depth + 1, i === n.children.length - 1, depth ? pre + (last ? '   ' : '│  ') : ''));
         };
         walk(tree, 0, true, '');
-        window.requestAnimationFrame(() => { const sel = el.querySelector('.cb-p-tree.is-sel'); if (sel) sel.scrollIntoView({ block: 'center' }); });
+        window.requestAnimationFrame(() => { const se = el.querySelector('.cb-p-tree.is-sel'); if (se) se.scrollIntoView({ block: 'center' }); });
+        return;
       }
+      if (onSignal || (h && !sel)) {
+        sec('This signal');
+        if (h.kind === 'tract') kv('Pathway', bundleName(h.sp.l.bundle) + (h.sp.back ? ', travelling back' : ''));
+        if (src.st) kv('Lands in', aalName(src.st.label) + (src.st.nucleus ? ' and the ' + src.st.nucleus.toLowerCase() : ''));
+        if (src.st) kv('Kind of work', (KIND_TAG[src.st.kind] || src.st.kind) + (src.st.what ? ' · ' + src.st.what : ''));
+        if (src.type === 'think') { const M = p.metab.get(src.sid); kv('What it is', 'One of the spikes that keep circulating through prefrontal loops while the model deliberates.'); if (M && M.calls) kv('Energy so far', `${M.calls} model calls · ${fmtTok(M.outTok)} tokens written · working memory ${fmtTok(M.ctx)}`); }
+        if (src.type === 'body') { const V = p.vitals.get(src.machine || 'local'); kv('What it is', 'A body signal from the machine, not from Claude.'); if (V) kv('Now', `cpu ${Math.round((V.cpu || 0) * 100)}% · memory ${Math.round((V.mem || 0) * 100)}%` + (V.rx != null ? ` · network ${fmtRate((V.rx || 0) + (V.tx || 0))}` : '')); }
+        if (src.type === 'dream') kv('What it is', 'A replay while nothing runs. The original happened at ' + hhmm(src.t) + '.');
+        if (src.type === 'running') kv('What it is', 'The call is still running; these spikes keep its pathway alive until the result comes back.');
+        if (h.kind === 'note') { kv('From', h.sp.a.name); kv('To', h.sp.b.name); }
+      }
+      if (sel) this.renderDetail(el, sel, P, { sec, row, kv, openFile });
+      else if (!h) row('is-empty').setText('Nothing to show.');
       return;
     }
 
@@ -2649,7 +3063,7 @@ class BrainView extends ItemView {
     if (this.tractSpikes && this.tractSpikes.length) {
       const done = [];
       this.tractSpikes = this.tractSpikes.filter(sp => ((sp.t += dt * sp.speed) < 1) || (sp.onEnd && done.push(sp.onEnd), false));
-      for (const f of done) { try { f(); } catch (e) { console.error('[claude-brain]', e); } }
+      for (const f of done) { try { f(); } catch (e) { console.error('[agent-brain]', e); } }
     }
     this.ongoing(dt);
     this.vitalSigns(dt);
@@ -2936,9 +3350,30 @@ class BrainView extends ItemView {
     return out;
   }
 
+  // the look (anatomy or atlas), eased between the two so switching is a short crossfade
+  lookParams() {
+    const want = this.plugin.settings.look === 'atlas' ? 1 : 0, now = performance.now();
+    const dt = Math.min(0.1, (now - (this._lookAt || now)) / 1000); this._lookAt = now;
+    if (this.lookK == null) this.lookK = want;
+    if (this.lookK !== want) { this.lookK += Math.sign(want - this.lookK) * Math.min(Math.abs(want - this.lookK), Math.max(dt, 0.016) * 2.5); this.needsDraw = true; }
+    const k = this.lookK, A = LOOKS.anatomy, B = LOOKS.atlas, L = this._look || (this._look = {});
+    for (const key in A) if (key !== 'bg') L[key] = A[key] + (B[key] - A[key]) * k;
+    L.k = k;
+    if (this.scene && this.scene.background && this._lookBgK !== k) {
+      this._lookBgK = k;
+      this.scene.background.setHex(A.bg).lerp(this._bgB || (this._bgB = new THREE.Color(B.bg)), k);
+    }
+    return L;
+  }
+  lobeTint(lobe) {
+    const c = this._lobeTint || (this._lobeTint = {});
+    return c[lobe] || (c[lobe] = new THREE.Color(LOBES[lobe] ? LOBES[lobe].color : '#ffffff'));
+  }
+
   draw() {
     this.updateCamera();
-    const U = this.brainMat.uniforms;
+    const U = this.brainMat.uniforms, LK = this.lookParams();
+    U.uLook.value = LK.k;
     // pulses: upload the strongest MAXP to the GPU
     const env = (p) => { const r = p.rise || 0.18; const a = Math.min(1, p.t / r); const d = Math.max(0, 1 - (p.t - r) / (p.life - r)); return p.amp * a * a * (3 - 2 * a) * d * d; };
     const breath = this.breaths();
@@ -2974,18 +3409,24 @@ class BrainView extends ItemView {
         pos[i * 3] = n.x; pos[i * 3 + 1] = n.y; pos[i * 3 + 2] = n.z;
         const dimmed = this.dim.has(n.lobe);
         const a = Math.min(1, n.act);
-        const base = n.hub ? 0.24 : n.learned ? 0.26 + Math.min(0.14, n.w * 0.02) : 0.3;
+        const base = (n.hub ? 0.24 : n.learned ? 0.26 + Math.min(0.14, n.w * 0.02) : 0.3) * LK.node;
         const c = n.actColor;
-        const br = n.learned ? 1.0 : 0.93, bg = n.learned ? 0.76 : 0.9, bb = n.learned ? 0.48 : 0.84;   // learned files glow warm
+        let br = n.learned ? 1.0 : 0.93, bg = n.learned ? 0.76 : 0.9, bb = n.learned ? 0.48 : 0.84;   // learned files glow warm
+        // atlas: notes take a soft tint of their region, so the regions read at a glance
+        if (LK.tint > 0 && !n.learned) { const t = this.lobeTint(n.lobe), q = LK.tint; br = br * (1 - q) + t.r * q; bg = bg * (1 - q) + t.g * q; bb = bb * (1 - q) + t.b * q; }
         colA[i * 3] = (br * (1 - a) + c.r * a) * (dimmed ? 0.15 : base + a);
         colA[i * 3 + 1] = (bg * (1 - a) + c.g * a) * (dimmed ? 0.15 : base + a);
         colA[i * 3 + 2] = (bb * (1 - a) + c.b * a) * (dimmed ? 0.15 : base + a);
-        size[i] = n.size * (n === this.hover ? 1.8 : 1);
+        size[i] = n.size * LK.nodeSize * (n === this.hover ? 1.8 : 1);
         glow[i] = a * (n.hub ? 0.45 : 0.7);
       });
       ng.attributes.position.needsUpdate = true; ng.attributes.aColor.needsUpdate = true; ng.attributes.aSize.needsUpdate = true; ng.attributes.aGlow.needsUpdate = true;
       this.nodeObj.material.uniforms.uScale.value = this.cssH * 0.9 * Math.min(2, window.devicePixelRatio || 1);
+      this.nodeObj.material.uniforms.uRing.value = LK.ring;
     }
+    if (this.linkObj) this.linkObj.material.opacity = LK.link;
+    if (this.learnObj) this.learnObj.material.opacity = LK.learn;
+    if (this.tractMat) this.tractMat.uniforms.uOpacity.value = this.tractMat.uniforms.uSlabOn.value > 0.5 ? LOOKS.anatomy.tract : LK.tract;
     // spikes: light trails travelling along link curves
     const sg = this.spikeGeo;
     if (sg) {
@@ -3000,7 +3441,7 @@ class BrainView extends ItemView {
           pos[k * 3] = u * u * A.x + 2 * u * t * l.c.x + t * t * B.x;
           pos[k * 3 + 1] = u * u * A.y + 2 * u * t * l.c.y + t * t * B.y;
           pos[k * 3 + 2] = u * u * A.z + 2 * u * t * l.c.z + t * t * B.z;
-          colA[k * 3] = s.c.r * f; colA[k * 3 + 1] = s.c.g * f; colA[k * 3 + 2] = s.c.b * f;
+          colA[k * 3] = s.c.r * f * LK.spike; colA[k * 3 + 1] = s.c.g * f * LK.spike; colA[k * 3 + 2] = s.c.b * f * LK.spike;
           size[k] = (j === 0 ? 3.2 : 2.4) * f; glow[k] = j === 0 ? 0.55 : 0.2 * f;
           k++;
         }
@@ -3012,7 +3453,7 @@ class BrainView extends ItemView {
           const tt = Math.max(0, sp.t - j * 0.016), f = (1 - j / 10) * sp.k;
           this.tractPoint(sp.l, sp.fwd ? tt : 1 - tt, tp);
           pos[k * 3] = tp.x; pos[k * 3 + 1] = tp.y; pos[k * 3 + 2] = tp.z;
-          colA[k * 3] = sp.c.r * f; colA[k * 3 + 1] = sp.c.g * f; colA[k * 3 + 2] = sp.c.b * f;
+          colA[k * 3] = sp.c.r * f * LK.spike; colA[k * 3 + 1] = sp.c.g * f * LK.spike; colA[k * 3 + 2] = sp.c.b * f * LK.spike;
           size[k] = (j === 0 ? 4.4 : 2.8) * (0.5 + 0.5 * f); glow[k] = j === 0 ? 0.75 : 0.25 * f;
           k++;
         }
@@ -3020,6 +3461,7 @@ class BrainView extends ItemView {
       sg.setDrawRange(0, k);
       sg.attributes.position.needsUpdate = true; sg.attributes.aColor.needsUpdate = true; sg.attributes.aSize.needsUpdate = true; sg.attributes.aGlow.needsUpdate = true;
       this.spikeObj.material.uniforms.uScale.value = this.nodeObj ? this.nodeObj.material.uniforms.uScale.value : 300;
+      this.spikeObj.material.uniforms.uRing.value = LK.ring * 0.5;
     }
     {
       const on = this.plugin.settings.memoryTrace !== false, K = this.plugin.engK(), vl = this.vitalLevel || 0;
@@ -3028,6 +3470,7 @@ class BrainView extends ItemView {
         // ventricles: memory pressure of the busiest machine (only above half full, so they stay quiet normally)
         if (it.kind === 'csf' && vl > 0.5 && act < (vl - 0.5) * 1.2) { act = (vl - 0.5) * 1.2; it.actColor.set(vl > 0.88 ? WAIT : VITAL); }
         it.mat.uniforms.uAct.value = act; it.mat.uniforms.uActColor.value.copy(it.actColor);
+        if (it.alpha0 != null) it.mat.uniforms.uAlpha.value = it.alpha0 * LK.inner;
         const tv = on && it.eng > 0 ? 1 - Math.exp(-it.eng * K * 0.1) : 0;
         it.mat.uniforms.uTrace.value = tv;
         if (tv > 0) it.mat.uniforms.uTraceC.value.setRGB(it.engC.r / it.eng, it.engC.g / it.eng, it.engC.b / it.eng);
@@ -3045,7 +3488,7 @@ class BrainView extends ItemView {
     this.updateClip();
     const glow = this.plugin.settings.bloom === false ? 0 : Number(this.plugin.settings.glow);
     this.bloom.enabled = glow > 0.02;
-    this.bloom.strength = 0.9 * glow;
+    this.bloom.strength = 0.9 * glow * LK.bloom;
     this.composer.render();
     this.drawOverlay();
   }
@@ -3150,7 +3593,7 @@ class BrainView extends ItemView {
       this.labelBlocks = blocks;
       // keep labels clear of the region list on the left and the detail panel on the right
       const leftEdge = !this.mini && this.cssW > 700 && this.tlColEl ? this.tlColEl.offsetLeft + this.tlColEl.offsetWidth + 12 : 8;
-      const rightEdge = this.cssW - 8 - (this.panel && !this.mini ? 352 : 0);
+      const rightEdge = this.cssW - 8 - (this.panel && !this.mini ? this.panelWidth() + 22 : 0);
       for (const bk of blocks) {
         bk.x = Math.max(leftEdge, Math.min(rightEdge - bk.w, bk.x));
         const { P, alpha } = bk;
@@ -3225,7 +3668,7 @@ class BrainView extends ItemView {
 
 /* ================================================================ plugin */
 
-class ClaudeBrainPlugin extends Plugin {
+class AgentBrainPlugin extends Plugin {
   async onload() {
     const data = (await this.loadData()) || {};
     const { memory, learned, daily, engram, regions, ...saved } = data;
@@ -3257,15 +3700,15 @@ class ClaudeBrainPlugin extends Plugin {
     this.t0 = performance.now();
     this.registerView(VIEW_TYPE, (leaf) => new BrainView(leaf, this));
     this.registerView(VIEW_MINI, (leaf) => new BrainView(leaf, this, true));
-    this.addRibbonIcon('brain-circuit', 'Claude Brain', () => this.activateView());
-    this.addCommand({ id: 'open', name: 'Open Claude Brain view', callback: () => this.activateView() });
+    this.addRibbonIcon('brain-circuit', 'Agent Brain', () => this.activateView());
+    this.addCommand({ id: 'open', name: 'Open Agent Brain view', callback: () => this.activateView() });
     this.addCommand({ id: 'demo', name: 'Play demo session', callback: () => this.runDemo() });
     this.addCommand({ id: 'copy-hooks', name: 'Copy Claude Code hook config to clipboard', callback: () => this.copyHooks() });
     this.addCommand({ id: 'reset-memory', name: 'Reset memory trace', callback: () => this.resetMemory() });
     this.addCommand({ id: 'open-mini', name: 'Open mini brain in the right sidebar', callback: () => this.activateMini() });
-    this.addCommand({ id: 'daily-note', name: "Write and open today's activity note", callback: async () => { const p = await this.writeDailyNote(null, true); if (!p) new Notice('Claude Brain: no activity recorded today yet.'); } });
+    this.addCommand({ id: 'daily-note', name: "Write and open today's activity note", callback: async () => { const p = await this.writeDailyNote(null, true); if (!p) new Notice('Agent Brain: no activity recorded today yet.'); } });
     this.addCommand({ id: 'reset-learned', name: 'Forget learned connections', callback: () => this.resetLearned() });
-    this.addCommand({ id: 'reset-engram', name: 'Clear the activity trace', callback: () => { this.resetEngram(); new Notice('Claude Brain: activity trace cleared.'); } });
+    this.addCommand({ id: 'reset-engram', name: 'Clear the activity trace', callback: () => { this.resetEngram(); new Notice('Agent Brain: activity trace cleared.'); } });
     this.addCommand({ id: 'install-hooks', name: 'Install Claude Code hooks on this computer', callback: () => this.installLocalHooks() });
     this.addSettingTab(new BrainSettingTab(this.app, this));
     this.statusBar = this.addStatusBarItem();
@@ -3299,7 +3742,7 @@ class ClaudeBrainPlugin extends Plugin {
 
   async loadGeo() {
     if (this.geo) return this.geo;
-    try { const [m, A] = await Promise.all([this.loadBrainMesh(), this.loadAnatomy()]); return this.ensureGeo(m, A); } catch (e) { console.error('[claude-brain] geometry', e); return null; }
+    try { const [m, A] = await Promise.all([this.loadBrainMesh(), this.loadAnatomy()]); return this.ensureGeo(m, A); } catch (e) { console.error('[agent-brain] geometry', e); return null; }
   }
   ensureGeo(m, A) {
     if (this.geo) return this.geo;
@@ -3327,7 +3770,7 @@ class ClaudeBrainPlugin extends Plugin {
       const p = l.pts, n = p.length / 3;
       ends[i * 6] = p[0]; ends[i * 6 + 1] = p[1]; ends[i * 6 + 2] = p[2]; ends[i * 6 + 3] = p[n * 3 - 3]; ends[i * 6 + 4] = p[n * 3 - 2]; ends[i * 6 + 5] = p[n * 3 - 1];
     });
-    this.geo = { anchors, ends, bundleIdx, nTracts: T.length };
+    this.geo = { anchors, ends, bundleIdx, bundleOf: T.map(l => l.bundle), nTracts: T.length };
     return this.geo;
   }
   // where an action lands: a gyrus (AAL label) for that kind of work, always the same one for the same target
@@ -3453,23 +3896,23 @@ class ClaudeBrainPlugin extends Plugin {
   resetMemory() {
     this.memory = { at: Date.now(), day: dayKey(), trace: new Array(8).fill(0), today: new Array(8).fill(0) };
     this.saveAll();
-    new Notice('Claude Brain: memory trace cleared.');
+    new Notice('Agent Brain: memory trace cleared.');
   }
 
   // the anatomy files are not part of main.js: they come with the release and are fetched from it once when missing
   // (a plugin installed from the community list only gets main.js, manifest.json and styles.css)
-  pluginDir() { return this.manifest && this.manifest.dir ? this.manifest.dir : `${this.app.vault.configDir}/plugins/claude-brain`; }
+  pluginDir() { return this.manifest && this.manifest.dir ? this.manifest.dir : `${this.app.vault.configDir}/plugins/agent-brain`; }
   async fetchAsset(name) {
     const meta = ASSETS[name];
     if (!meta || !REPO || typeof requestUrl !== 'function') throw new Error(name + ' is missing');
-    if (!this._fetchNotice) this._fetchNotice = new Notice(`Claude Brain: downloading the brain anatomy (${(Object.values(ASSETS).reduce((n, a) => n + a.size, 0) / 1048576).toFixed(1)} MB) from the GitHub release. This happens once.`, 8000);
+    if (!this._fetchNotice) this._fetchNotice = new Notice(`Agent Brain: downloading the brain anatomy (${(Object.values(ASSETS).reduce((n, a) => n + a.size, 0) / 1048576).toFixed(1)} MB) from the GitHub release. This happens once.`, 8000);
     const url = `https://github.com/${REPO}/releases/download/${this.manifest.version}/${name}`;
     const res = await requestUrl({ url, method: 'GET', throw: false });
     if (res.status !== 200) throw new Error(`could not download ${name} (HTTP ${res.status})`);
     const ab = res.arrayBuffer;
     const hex = [...new Uint8Array(await crypto.subtle.digest('SHA-256', ab))].map(b => b.toString(16).padStart(2, '0')).join('');
     if (hex !== meta.sha256) throw new Error(`${name} did not match its checksum`);
-    try { await this.app.vault.adapter.writeBinary(`${this.pluginDir()}/${name}`, ab); } catch (e) { console.warn('[claude-brain] could not cache', name, e); }
+    try { await this.app.vault.adapter.writeBinary(`${this.pluginDir()}/${name}`, ab); } catch (e) { console.warn('[agent-brain] could not cache', name, e); }
     return ab;
   }
   async readAsset(name) {
@@ -3508,7 +3951,7 @@ class ClaudeBrainPlugin extends Plugin {
   // other binary assets next to main.js (gzip optional)
   async loadAsset(name) {
     let ab = null;
-    try { ab = await this.readAsset(name); } catch (e) { console.warn('[claude-brain]', e.message || e); return null; }
+    try { ab = await this.readAsset(name); } catch (e) { console.warn('[agent-brain]', e.message || e); return null; }
     if (!ab) return null;
     let u8 = new Uint8Array(ab);
     if (u8[0] === 0x1f && u8[1] === 0x8b) {
@@ -3521,7 +3964,7 @@ class ClaudeBrainPlugin extends Plugin {
   async loadAnatomy() {
     if (this._anat) return this._anat;
     const [aal, inner, t1, tracts] = await Promise.all(['aal.bin', 'inner.bin', 't1.bin', 'tracts.bin'].map(n => this.loadAsset(n).catch(() => null)));
-    const safe = (f, b) => { try { return b ? f(b) : null; } catch (e) { console.error('[claude-brain]', e); return null; } };
+    const safe = (f, b) => { try { return b ? f(b) : null; } catch (e) { console.error('[agent-brain]', e); return null; } };
     this._anat = { aal: safe(parseAal, aal), inner: safe(parseInner, inner), t1: safe(parseT1, t1), tracts: safe(parseTracts, tracts) };
     return this._anat;
   }
@@ -3531,8 +3974,21 @@ class ClaudeBrainPlugin extends Plugin {
     const port = Number(this.settings.port) || DEFAULTS.port;
     const srv = http.createServer((req, res) => {
       const url = req.url || '';
+      // Only Claude Code, the server scripts and the SSH tunnel talk to this listener. A web page open in a browser on
+      // this machine can reach 127.0.0.1 too, so anything that looks like it came from one is refused: browsers add
+      // Sec-Fetch-* and Origin headers, and DNS rebinding shows up as a Host other than this machine.
+      if (!fromThisMachine(req.headers)) {
+        res.writeHead(403); res.end(); req.resume();
+        if (!this._refusedNote) {
+          this._refusedNote = true;
+          const h = req.headers;
+          console.warn('[agent-brain] refused a request that looked like it came from a web page', { host: h.host, origin: h.origin, site: h['sec-fetch-site'], url });
+          new Notice('Agent Brain refused a request to its listener that looked like it came from a web page. If your hooks stop showing up, see the developer console.', 10000);
+        }
+        return;
+      }
       const src = String(req.headers['x-brain-source'] || 'local').replace(/[^\w.-]/g, '').slice(0, 40) || 'local';
-      if (req.method === 'GET' && url === '/ping') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('claude-brain'); return; }
+      if (req.method === 'GET' && url === '/ping') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('agent-brain'); return; }
       // server setup script, fetched through the tunnel:  curl -s http://127.0.0.1:27182/install.sh | sh
       if (req.method === 'GET' && url === '/install.sh') { res.writeHead(200, { 'Content-Type': 'text/x-sh; charset=utf-8' }); res.end(INSTALL_SH); return; }
       // Claude Code telemetry (OTLP/HTTP JSON): every model call with its tokens, time and cost
@@ -3586,15 +4042,15 @@ class ClaudeBrainPlugin extends Plugin {
         if (aborted) return;
         res.writeHead(204); res.end();
         const text = Buffer.concat(chunks).toString('utf8');
-        if (batch) { try { this.handleBatch(text, src); } catch (e) { console.error('[claude-brain]', e); } return; }
+        if (batch) { try { this.handleBatch(text, src); } catch (e) { console.error('[agent-brain]', e); } return; }
         let ev = null;
         try { ev = JSON.parse(text); } catch (e) { return; }
-        try { this.handleEvent(ev, { src }); } catch (e) { console.error('[claude-brain]', e); }
+        try { this.handleEvent(ev, { src }); } catch (e) { console.error('[agent-brain]', e); }
       });
     });
     srv.on('error', (e) => {
       this.serverOk = false; this.updateStatusBar();
-      new Notice(`Claude Brain: could not listen on 127.0.0.1:${port} (${e.code || e.message}).`);
+      new Notice(`Agent Brain: could not listen on 127.0.0.1:${port} (${e.code || e.message}).`);
     });
     srv.listen(port, '127.0.0.1', () => { this.serverOk = true; this.updateStatusBar(); });
     this.server = srv;
@@ -3654,7 +4110,7 @@ class ClaudeBrainPlugin extends Plugin {
       if (s.wait && !PASSIVE.has(e)) s.wait = null;
       switch (e) {
         case 'SessionStart': s.state = 'session started'; s.busy = false; s.inflight = 0; phase('idle'); break;
-        case 'UserPromptSubmit': s.state = 'thinking'; s.busy = true; s.inflight = 0; s.turnStart = now; phase('thinking'); break;
+        case 'UserPromptSubmit': s.state = 'thinking'; s.busy = true; s.inflight = 0; s.turnStart = now; s.said = ''; s.saidSeal = false; phase('thinking'); break;
         case 'PreToolUse': {
           const lobe = (CAT[evCat(ev)] || CAT.other).lobe;
           s.state = describe(ev); s.last = s.state; s.busy = true; s.inflight++;
@@ -3664,7 +4120,7 @@ class ClaudeBrainPlugin extends Plugin {
           break;
         }
         case 'PostToolUse': case 'PostToolUseFailure':
-          s.busy = true; s.inflight = Math.max(0, s.inflight - 1);
+          s.busy = true; s.inflight = Math.max(0, s.inflight - 1); s.saidSeal = true;
           if (!s.inflight) { s.state = 'thinking'; phase('thinking'); }
           this.trackPlan(s, ev);
           break;
@@ -3701,6 +4157,7 @@ class ClaudeBrainPlugin extends Plugin {
     const learnt = e === 'PreToolUse' ? this.learnTouch(s, a, ev, now) : null;
     this.countDaily(s, a, ev, now, took);
     const rec = this.record(ev, s, a, now);
+    this.keepDetail(rec, ev, s, a, now);
     this.strike(rec, ev, s, a, now);
     this.watchStuck(s, a, ev, now);
     this.updateStatusBar();
@@ -3726,7 +4183,7 @@ class ClaudeBrainPlugin extends Plugin {
     this.history.sort((x, y) => x.t - y.t);
     const from = items[0].ts, to = items[items.length - 1].ts;
     this.noteSource(src, 'batch', Date.now(), items.length);
-    new Notice(`Claude Brain: ${items.length} queued event${items.length > 1 ? 's' : ''} from ${src} (${fmtSpan(Math.max(60000, to - from))} while the tunnel was down). Replaying them now.`, 8000);
+    new Notice(`Agent Brain: ${items.length} queued event${items.length > 1 ? 's' : ''} from ${src} (${fmtSpan(Math.max(60000, to - from))} while the tunnel was down). Replaying them now.`, 8000);
     this.forEachView(v => v.startReplay(from, Math.max(2, (to - from) / 12000), to + 1));
     this.updateStatusBar();
   }
@@ -3742,7 +4199,7 @@ class ClaudeBrainPlugin extends Plugin {
         const name = String(a['event.name'] || (lr.body && lr.body.stringValue) || '').replace(/^claude_code\./, '');
         const ns = String(lr.timeUnixNano || lr.observedTimeUnixNano || '');
         const t = ns.length > 6 ? Math.min(Date.now(), Number(ns.slice(0, -6)) || Date.now()) : Date.now();
-        try { this.onOtel(name, a, t, src); } catch (e) { console.error('[claude-brain] telemetry', e); }
+        try { this.onOtel(name, a, t, src); } catch (e) { console.error('[agent-brain] telemetry', e); }
       }
     }
   }
@@ -3914,7 +4371,7 @@ class ClaudeBrainPlugin extends Plugin {
     let x = this.sources.get(name);
     if (!x) { x = { name, lastEvent: 0, lastBeat: 0, events: 0, batches: 0, queued: 0, down: false }; this.sources.set(name, x); }
     if (kind === 'beat') {
-      if (x.down) { x.down = false; new Notice(`Claude Brain: tunnel to ${name} is back up.`, 5000); }
+      if (x.down) { x.down = false; new Notice(`Agent Brain: tunnel to ${name} is back up.`, 5000); }
       x.lastBeat = t;
     } else if (kind === 'batch') { x.batches++; x.queued += n || 0; }
     else { x.events++; x.lastEvent = Math.max(x.lastEvent, t); }
@@ -3928,7 +4385,7 @@ class ClaudeBrainPlugin extends Plugin {
     for (const x of this.sources.values()) {
       if (x.lastBeat && !x.down && Date.now() - x.lastBeat > 60000) {
         x.down = true;
-        new Notice(`Claude Brain: tunnel to ${x.name} is down. The server keeps its events and sends them when it reconnects.`, 8000);
+        new Notice(`Agent Brain: tunnel to ${x.name} is down. The server keeps its events and sends them when it reconnects.`, 8000);
       }
     }
   }
@@ -3980,9 +4437,15 @@ class ClaudeBrainPlugin extends Plugin {
     for (const k of Object.keys(this.regionMem)) { const L = this.regionMem[k].filter(x => x[0] > cut); if (L.length) this.regionMem[k] = L; else delete this.regionMem[k]; }
   }
 
-  // MessageDisplay: Claude's reply streaming to the screen, chunk by chunk. Only the length is used, never the text.
+  // MessageDisplay: Claude's reply streaming to the screen, chunk by chunk. The length drives the brain; the text is
+  // kept in memory only (with "Full call details" on), so the inspector can show what Claude said before each call.
   onSpeech(s, ev, now, opts) {
-    const n = String(ev.display_content != null ? ev.display_content : ev.text || '').length;
+    const chunk = String(ev.display_content != null ? ev.display_content : ev.text || ''), n = chunk.length;
+    if (this.settings.callDetails !== false && !this.isDemo(s)) {
+      if (s.saidSeal || !s.said) { s.said = ''; s.saidSeal = false; }
+      s.said = typeof ev.accumulated_text === 'string' && ev.accumulated_text.length >= s.said.length ? ev.accumulated_text : s.said + chunk;
+      if (s.said.length > 12000) s.said = '…' + s.said.slice(-12000);
+    }
     s.at = Math.max(s.at, now); s.speakAt = now; s.speakN = (s.speakN || 0) + n;
     if (s.busy && !s.wait && !s.inflight && s.state !== 'writing') s.state = 'writing';
     if (!s._speak || (this.geo && !s._speak[0].fibre)) s._speak = this.strikesFor({ e: 'Message', sid: s.id, n: 0 });
@@ -3996,8 +4459,36 @@ class ClaudeBrainPlugin extends Plugin {
     r.n = s.speakN || 0; r.text = `${r.n.toLocaleString('en-US')} characters`;
     s.speakN = 0;
     r.strikes = s._speak || [];
+    if (s.said) this.keepDetail(r, { hook_event_name: 'Message', session_id: s.id, text: s.said }, s, null, now);
     if (!this._replaying) this.forEachView(v => v.pushLog && v.pushLog({ hook_event_name: 'Message' }, '', s, null, { text: r.text }));
   }
+
+  /* ---------- full call details: every field Claude Code sends, kept in memory for the inspector, never on disk ---------- */
+
+  keepDetail(rec, ev, s, a, now) {
+    if (this.settings.callDetails === false || !rec || !ev) return;
+    const D = this.details || (this.details = new WeakMap()), Q = this.detailQ || (this.detailQ = []);
+    const lim = { left: DETAIL_CALL };
+    const d = { ev: capDeep(ev, lim, 0) };
+    if (ev.permission_mode) s.mode = String(ev.permission_mode);
+    if (rec.e === 'PreToolUse') {
+      d.mode = s.mode || '';
+      if (!a) {
+        // what Claude said just before it made this call (calls made together share it), and the step of its plan
+        if (s.said && !s.saidSeal) d.said = s.said;
+        const pl = this.plan(s);
+        if (pl && pl.current && !/^(next: |all tasks done)/.test(pl.current)) d.step = pl.current;
+      }
+    }
+    if (a) d.agent = { id: a.id, type: a.type, spawn: a.spawn || '', parent: a.parent || '', wf: !!a.wf, desc: a.desc || '' };
+    d.n = DETAIL_CALL - lim.left + 200;
+    const old = D.get(rec);
+    D.set(rec, d); Q.push([rec, d.n]);
+    this.detailN = (this.detailN || 0) + d.n - (old ? old.n : 0);
+    while (Q.length && (this.detailN > DETAIL_BUDGET || Q.length > 8000)) { const [r0, n0] = Q.shift(); if (D.get(r0) && D.get(r0).n === n0) { D.delete(r0); this.detailN -= n0; } }
+  }
+  detailOf(rec) { return rec && this.details ? this.details.get(rec) || null : null; }
+  clearDetails() { this.details = new WeakMap(); this.detailQ = []; this.detailN = 0; for (const s of this.sessions.values()) { s.said = ''; } }
 
   /* ---------- history (timeline, replay, focus panel) ---------- */
 
@@ -4082,7 +4573,7 @@ class ClaudeBrainPlugin extends Plugin {
     this.learned = { neurons: {}, synapses: {} };
     this.saveAll();
     this.forEachView(v => v.scheduleRebuild(0));
-    new Notice('Claude Brain: learned connections cleared.');
+    new Notice('Agent Brain: learned connections cleared.');
   }
 
   /* ---------- daily activity note ---------- */
@@ -4131,7 +4622,7 @@ class ClaudeBrainPlugin extends Plugin {
     L.push('---', 'type: claude-activity', 'date: ' + D.day, 'sessions: ' + S.length, 'prompts: ' + sum(x => x.prompts),
       'tool_calls: ' + sum(calls), 'active: ' + fmtSpan(sum(x => x.busyMs)), 'lobe: cerebellum', '---', '');
     L.push('# Claude activity · ' + date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }), '');
-    L.push('> [!info] Written by the Claude Brain plugin and refreshed every 10 minutes. Anything under "## My notes" is kept.', '');
+    L.push('> [!info] Written by the Agent Brain plugin and refreshed every 10 minutes. Anything under "## My notes" is kept.', '');
     const tok = S.some(x => x.calls);
     L.push('| Session | Source | Active | Prompts | Tool calls | Subagents | Workflows | Tasks done | Failures |' + (tok ? ' Model calls | Tokens in / out | Cost |' : ''), '|---|---|---:|---:|---:|---:|---:|---:|---:|' + (tok ? '---:|---:|---:|' : ''));
     for (const x of S) L.push(`| ${x.label} | ${x.src} | ${fmtSpan(x.busyMs)} | ${x.prompts} | ${calls(x)} | ${x.agents} | ${x.workflows} | ${x.tasksDone} | ${x.failures} |` + (tok ? ` ${x.calls || 0} | ${fmtTok(x.tokIn || 0)} / ${fmtTok(x.tokOut || 0)} | $${(x.cost || 0).toFixed(2)} |` : ''));
@@ -4168,7 +4659,7 @@ class ClaudeBrainPlugin extends Plugin {
       if (D === this.daily) this.dailyDirty = false;
       if (open) await this.app.workspace.openLinkText(path, '', true);
       return path;
-    } catch (e) { console.error('[claude-brain] daily note', e); return null; }
+    } catch (e) { console.error('[agent-brain] daily note', e); return null; }
   }
 
   /* ---------- subagents, workflows and the task list ---------- */
@@ -4181,8 +4672,8 @@ class ClaudeBrainPlugin extends Plugin {
       // label it with the Agent tool call that spawned it; agents nobody asked for by hand belong to the running workflow
       s.pending = s.pending.filter(p => now - p.at < 120000);
       const i = s.pending.findIndex(p => !p.type || p.type === a.type);
-      if (i >= 0) { a.desc = s.pending[i].desc; s.pending.splice(i, 1); }
-      else if (s.workflow && s.workflow.active) { a.wf = true; s.workflow.started++; }
+      if (i >= 0) { a.desc = s.pending[i].desc; a.spawn = s.pending[i].id || ''; a.parent = s.pending[i].by || ''; s.pending.splice(i, 1); }
+      else if (s.workflow && s.workflow.active) { a.wf = true; a.spawn = s.workflow.id || ''; s.workflow.started++; }
       s.agents.set(id, a);
     }
     if (ev.agent_type) a.type = String(ev.agent_type);
@@ -4190,6 +4681,8 @@ class ClaudeBrainPlugin extends Plugin {
     switch (e) {
       case 'PreToolUse': {
         a.tools++; a.last = describe(ev); a.inTool = true; a.lobe = (CAT[evCat(ev)] || CAT.other).lobe;
+        // an agent starting an agent of its own: remember who asked, for the lineage in the inspector
+        if (/^(Agent|Task)$/.test(ev.tool_name || '')) { const ti = ev.tool_input || {}; s.pending.push({ desc: clip(ti.description || '', 48), type: ti.subagent_type ? String(ti.subagent_type) : '', at: now, id: ev.tool_use_id ? String(ev.tool_use_id) : '', by: id }); }
         break;
       }
       case 'PostToolUse': case 'PostToolUseFailure': a.inTool = false; break;
@@ -4220,9 +4713,9 @@ class ClaudeBrainPlugin extends Plugin {
         if (ti.status === 'in_progress' && ti.activeForm) t.subject = String(ti.activeForm);
         s.tasks.set(id, t); s.planAt = now;
       } else if (name === 'Agent' || name === 'Task') {
-        s.pending.push({ desc: clip(ti.description || '', 48), type: ti.subagent_type ? String(ti.subagent_type) : '', at: now });
+        s.pending.push({ desc: clip(ti.description || '', 48), type: ti.subagent_type ? String(ti.subagent_type) : '', at: now, id: ev.tool_use_id ? String(ev.tool_use_id) : '', by: '' });
       } else if (name === 'Workflow') {
-        s.workflow = { name: workflowName(ti), since: now, lastAt: now, active: true, started: 0, done: 0 };
+        s.workflow = { name: workflowName(ti), since: now, lastAt: now, active: true, started: 0, done: 0, id: ev.tool_use_id ? String(ev.tool_use_id) : '' };
       }
     } else if (name === 'TaskCreate') {
       const subject = s.taskQueue.shift() || 'task';
@@ -4336,7 +4829,7 @@ class ClaudeBrainPlugin extends Plugin {
     if (this.serverOk && !waiting && working && agents) txt += ` · ${agents} agent${agents > 1 ? 's' : ''}`;
     this.statusBar.setText(`Claude · ${n > 1 ? n + ' sessions · ' : ''}${txt}`);
     this.statusBar.toggleClass('cb-sb-wait', waiting > 0 || down.length > 0);
-    this.statusBar.setAttr('title', 'Open Claude Brain');
+    this.statusBar.setAttr('title', 'Open Agent Brain');
   }
 
   toVaultRel(p, cwd) {
@@ -4374,24 +4867,24 @@ class ClaudeBrainPlugin extends Plugin {
   // writes the hooks into ~/.claude/settings.json on this computer (keeps your other hooks, makes a backup first)
   async installLocalHooks() {
     let fs, path, os;
-    try { fs = require('fs'); path = require('path'); os = require('os'); } catch (e) { new Notice('Claude Brain: no file access here.'); return; }
+    try { fs = require('fs'); path = require('path'); os = require('os'); } catch (e) { new Notice('Agent Brain: no file access here.'); return; }
     const port = Number(this.settings.port) || DEFAULTS.port;
     const mine = (g) => (g && Array.isArray(g.hooks) ? g.hooks : []).some(x => /27182\/event|brain-hook\.sh/.test(String(x.command || '') + String(x.url || '')) || String(x.command || '').includes(`:${port}/event`) || String(x.url || '').includes(`:${port}/event`));
     const strip = (hooks) => { let n = 0; for (const e of Object.keys(hooks || {})) { if (!Array.isArray(hooks[e])) continue; const keep = hooks[e].filter(g => !mine(g)); n += hooks[e].length - keep.length; if (keep.length) hooks[e] = keep; else delete hooks[e]; } return n; };
     const dir = path.join(os.homedir(), '.claude'), file = path.join(dir, 'settings.json');
     let cfg = {}, telemetry = 'off';
     try { if (fs.existsSync(file)) cfg = JSON.parse(fs.readFileSync(file, 'utf8') || '{}'); }
-    catch (e) { new Notice(`Claude Brain: could not read ${file} (${e.message}). Nothing was changed.`, 10000); return; }
+    catch (e) { new Notice(`Agent Brain: could not read ${file} (${e.message}). Nothing was changed.`, 10000); return; }
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      if (fs.existsSync(file)) fs.copyFileSync(file, file + '.claude-brain.bak');
+      if (fs.existsSync(file)) fs.copyFileSync(file, file + '.agent-brain.bak');
       cfg.hooks = cfg.hooks && typeof cfg.hooks === 'object' ? cfg.hooks : {};
       strip(cfg.hooks);
       const ours = this.hooksConfig();
       for (const e of Object.keys(ours)) cfg.hooks[e] = (cfg.hooks[e] || []).concat(ours[e]);
       telemetry = this.settings.telemetry ? mergeTelemetryEnv(cfg, port) : 'off';
       fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
-    } catch (e) { new Notice(`Claude Brain: could not write ${file} (${e.message}).`, 10000); return; }
+    } catch (e) { new Notice(`Agent Brain: could not write ${file} (${e.message}).`, 10000); return; }
     // an older copy in this vault's project settings would make every event arrive twice: take ours out there
     let moved = 0;
     const base = this.app.vault.adapter && this.app.vault.adapter.basePath;
@@ -4401,13 +4894,13 @@ class ClaudeBrainPlugin extends Plugin {
         const c = JSON.parse(fs.readFileSync(f, 'utf8') || '{}');
         const n = c.hooks ? strip(c.hooks) : 0;
         if (!n) continue;
-        fs.copyFileSync(f, f + '.claude-brain.bak');
+        fs.copyFileSync(f, f + '.agent-brain.bak');
         if (c.hooks && !Object.keys(c.hooks).length) delete c.hooks;
         fs.writeFileSync(f, JSON.stringify(c, null, 2)); moved += n;
       } catch (e) { /* leave a file we can't parse alone */ }
     }
     const tmsg = telemetry === 'set' ? ' Telemetry (model calls, tokens, cost) now goes to the brain as well.' : telemetry === 'other' ? ' Telemetry already goes elsewhere, so it was left alone.' : '';
-    new Notice(`Claude Brain: hooks for ${Object.keys(this.hooksConfig()).length} events installed in ${file}${moved ? ', and the older copy in this vault\'s .claude settings was removed' : ''}.${tmsg} Restart running Claude Code sessions to use them.`, 12000);
+    new Notice(`Agent Brain: hooks for ${Object.keys(this.hooksConfig()).length} events installed in ${file}${moved ? ', and the older copy in this vault\'s .claude settings was removed' : ''}.${tmsg} Restart running Claude Code sessions to use them.`, 12000);
   }
   async copyHooks() {
     await navigator.clipboard.writeText(this.hooksJson());
@@ -4446,7 +4939,18 @@ class ClaudeBrainPlugin extends Plugin {
     const P = (name, ag, extra) => Object.assign({ hook_event_name: 'PostToolUse', tool_name: name }, ag || {}, extra || {});
     const AS = (ag) => Object.assign({ hook_event_name: 'SubagentStart' }, ag);
     const AE = (ag) => Object.assign({ hook_event_name: 'SubagentStop' }, ag);
-    const run = (sid, cwd, steps) => { for (const [t, ev] of steps) window.setTimeout(() => this.handleEvent(Object.assign({ session_id: sid, cwd }, ev)), t); };
+    // every call gets an id, as in a real session, so the inspector pairs each call with its result
+    const run = (sid, cwd, steps) => {
+      const open = new Map(); let n = 0;
+      for (const [, ev] of [...steps].sort((x, y) => x[0] - y[0])) {
+        if (!ev.tool_name || ev.tool_use_id) continue;
+        const k = (ev.agent_id || '') + '|' + ev.tool_name, q = open.get(k) || open.set(k, []).get(k);
+        if (ev.hook_event_name === 'PreToolUse') { ev.tool_use_id = `toolu_demo_${sid.slice(5, 6)}${++n}`; q.push(ev.tool_use_id); }
+        else if (ev.hook_event_name === 'PermissionRequest') { if (q.length) ev.tool_use_id = q[q.length - 1]; }
+        else if (q.length) ev.tool_use_id = q.shift();
+      }
+      for (const [t, ev] of steps) window.setTimeout(() => this.handleEvent(Object.assign({ session_id: sid, cwd, permission_mode: 'default' }, ev)), t);
+    };
 
     // A: a local session in this vault, delegating a scan to an Explore subagent
     const sidA = 'demo-a-' + stamp, ex = { agent_id: 'demo-ex-' + stamp, agent_type: 'Explore' };
@@ -4454,19 +4958,19 @@ class ClaudeBrainPlugin extends Plugin {
     run(sidA, base, [
       [0, { hook_event_name: 'SessionStart' }],
       [300, { hook_event_name: 'InstructionsLoaded', file_path: base + '\\CLAUDE.md', load_reason: 'session_start' }],
-      [900, { hook_event_name: 'UserPromptSubmit' }],
+      [900, { hook_event_name: 'UserPromptSubmit', prompt: 'Find this week\'s deadlines in my notes and update the project plan.' }],
       [2000, T('Read', { file_path: abs(pick(/index|home|readme/i)) })], [2500, P('Read')],
       [3200, T('Grep', { pattern: 'deadline', path: base })], [3700, P('Grep')],
       [4300, T('Read', { file_path: abs(pick(/notes?|journal|daily/i)) })], [4700, P('Read')],
-      [5400, T('Agent', { subagent_type: 'Explore', description: 'Scan the vault for meeting notes' })],
+      [5400, T('Agent', { subagent_type: 'Explore', description: 'Scan the vault for meeting notes', prompt: 'Look through the vault for meeting notes from the last two weeks. List every action item with its owner and due date, and say which note it came from.' })],
       [5600, AS(ex)],
       [6000, T('Read', { file_path: abs(pick(/meeting|people|team/i)) }, ex)], [6300, P('Read', ex)],
       [6800, T('Grep', { pattern: 'action items', path: base }, ex)], [7200, P('Grep', ex)],
       [7600, T('Read', { file_path: abs(pick(/meeting|people|team/i)) }, ex)], [8000, P('Read', ex)],
-      [8600, AE(ex)], [8700, P('Agent')],
+      [8600, Object.assign(AE(ex), { last_assistant_message: 'Found 3 meeting notes with 5 action items; 2 are due this week.' })], [8700, P('Agent', null, { tool_response: { content: [{ type: 'text', text: 'Found 3 meeting notes with 5 action items; 2 are due this week.' }] } })],
       [9200, T('WebSearch', { query: 'obsidian dataview task query' })], [9900, P('WebSearch')],
       [10800, T('Edit', { file_path: abs(pick(/projects?|plan|todo/i)) })], [11300, P('Edit')],
-      [12000, T('Bash', { command: 'git status --short && npm test 2>&1 | tail -n 20', description: 'Run tests' })], [13000, P('Bash')],
+      [12000, T('Bash', { command: 'git status --short && npm test 2>&1 | tail -n 20', description: 'Run tests' })], [13000, P('Bash', null, { tool_response: { stdout: ' M projects/plan.md\n\n  42 passing (1s)\n', stderr: '', interrupted: false } })],
       ...say(13600, 26),
       [15000, { hook_event_name: 'Stop' }],
     ]);
@@ -4475,12 +4979,12 @@ class ClaudeBrainPlugin extends Plugin {
     const sidB = 'demo-b-' + stamp, cwdB = '/home/dev/api-server';
     run(sidB, cwdB, [
       [400, { hook_event_name: 'SessionStart' }],
-      [1300, { hook_event_name: 'UserPromptSubmit' }],
+      [1300, { hook_event_name: 'UserPromptSubmit', prompt: 'The API retries failed requests forever. Find out why and fix it.' }],
       [2200, T('TaskCreate', { subject: 'Reproduce the retry bug' })], [2300, P('TaskCreate', null, { tool_response: 'Task #1 created successfully' })],
       [2400, T('TaskCreate', { subject: 'Fix the retry policy' })], [2500, P('TaskCreate', null, { tool_response: 'Task #2 created successfully' })],
       [2600, T('TaskCreate', { subject: 'Run the test suite' })], [2700, P('TaskCreate', null, { tool_response: 'Task #3 created successfully' })],
       [2900, T('TaskUpdate', { taskId: '1', status: 'in_progress', activeForm: 'Reproducing the retry bug' })], [3000, P('TaskUpdate')],
-      [3400, T('Bash', { command: 'journalctl -u api --since "1 hour ago" | grep -i retry', description: 'Check the agent logs' })], [3700, P('Bash')],
+      [3400, T('Bash', { command: 'journalctl -u api --since "1 hour ago" | grep -i retry', description: 'Check the agent logs' })], [3700, P('Bash', null, { tool_response: { stdout: 'api[812]: retry 1/∞ after 500 from /v1/jobs\napi[812]: retry 2/∞ after 500 from /v1/jobs\napi[812]: retry 3/∞ after 500 from /v1/jobs\n', stderr: '', interrupted: false } })],
       [3800, T('Read', { file_path: cwdB + '/src/agent/config.ts' })], [4200, P('Read')],
       [5000, T('Grep', { pattern: 'retryPolicy', path: cwdB + '/src' })], [5500, P('Grep')],
       [5800, T('TaskUpdate', { taskId: '1', status: 'completed' })], [5900, P('TaskUpdate')], [5950, { hook_event_name: 'TaskCompleted', task_name: 'Reproduce the retry bug' }],
@@ -4503,7 +5007,7 @@ class ClaudeBrainPlugin extends Plugin {
     const areas = ['getting-started', 'install', 'configuration', 'api', 'faq'];
     const stepsC = [
       [700, { hook_event_name: 'SessionStart' }],
-      [2300, { hook_event_name: 'UserPromptSubmit' }],
+      [2300, { hook_event_name: 'UserPromptSubmit', prompt: 'Check every page of the docs against the style guide.' }],
       [4200, T('WebFetch', { url: 'https://example.com/style-guide' })], [5400, P('WebFetch')],
       [6400, T('Workflow', { name: 'docs-audit', description: 'Check every page against the style guide' })],
       [6900, P('Workflow')],
@@ -4549,7 +5053,6 @@ class BrainSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     const save = () => this.plugin.saveAll();
     containerEl.empty();
-    containerEl.createEl('h2', { text: 'Claude Brain' });
     containerEl.createEl('p', { text: 'Listens for Claude Code hook events on 127.0.0.1 only. It never calls a model and uses no tokens. To place a note in a specific region, add "lobe: frontal" (frontal, motor, parietal, temporal, occipital, cerebellum, thalamus, stem) to its frontmatter.' });
     new Setting(containerEl).setName('Port').setDesc('Must match the port in the hook command. Changing it restarts the listener.')
       .addText(t => t.setValue(String(this.plugin.settings.port)).onChange(async (v) => {
@@ -4557,6 +5060,9 @@ class BrainSettingTab extends PluginSettingTab {
         if (!n || n < 1024 || n > 65535) return;
         this.plugin.settings.port = n; await save(); this.plugin.startServer();
       }));
+    new Setting(containerEl).setName('Look').setDesc('Anatomy: the realistic MRI glass brain. Atlas: a see-through brain where neurons (notes and files), synapses (links) and the signals stand out, tinted by region. Also in the layers menu, or press V.')
+      .addDropdown(d => d.addOption('anatomy', 'Anatomy').addOption('atlas', 'Atlas').setValue(this.plugin.settings.look || 'anatomy')
+        .onChange(async (v) => { this.plugin.settings.look = v; await save(); this.plugin.forEachView(w => { w.needsDraw = true; if (w.renderLookUi) w.renderLookUi(); }); }));
     new Setting(containerEl).setName('Glow').setDesc('How much activity and edges bloom. 0 turns the effect off (also lighter on the GPU).')
       .addSlider(sl => sl.setLimits(0, 1, 0.05).setValue(this.plugin.settings.bloom === false ? 0 : this.plugin.settings.glow).setDynamicTooltip()
         .onChange(async (v) => { this.plugin.settings.glow = v; this.plugin.settings.bloom = true; await save(); this.plugin.forEachView(w => { w.needsDraw = true; }); }));
@@ -4594,14 +5100,14 @@ class BrainSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Mini brain').setDesc('A small live view for the right sidebar, to keep an eye on things while you write.')
       .addButton(b => b.setButtonText('Open in sidebar').onClick(() => this.plugin.activateMini()));
 
-    containerEl.createEl('h3', { text: 'Daily activity note' });
+    new Setting(containerEl).setName('Daily activity note').setHeading();
     new Setting(containerEl).setName('Write a daily note').setDesc('One note per day with time, tool calls, subagents, workflows, finished tasks and files per session. Refreshed every 10 minutes; anything under "## My notes" is kept.')
       .addToggle(t => t.setValue(!!this.plugin.settings.dailyNote).onChange(async (v) => { this.plugin.settings.dailyNote = v; await save(); }))
-      .addButton(b => b.setButtonText('Open today').onClick(async () => { const p = await this.plugin.writeDailyNote(null, true); if (!p) new Notice('Claude Brain: no activity recorded today yet.'); }));
+      .addButton(b => b.setButtonText('Open today').onClick(async () => { const p = await this.plugin.writeDailyNote(null, true); if (!p) new Notice('Agent Brain: no activity recorded today yet.'); }));
     new Setting(containerEl).setName('Folder').setDesc('Where the daily notes go.')
       .addText(t => t.setValue(this.plugin.settings.dailyFolder).onChange(async (v) => { this.plugin.settings.dailyFolder = v.trim() || 'Claude Activity'; await save(); }));
 
-    containerEl.createEl('h3', { text: 'Alerts' });
+    new Setting(containerEl).setName('Alerts').setHeading();
     new Setting(containerEl).setName('Approval requests').setDesc('Alert when a session is blocked waiting for you to approve a tool.')
       .addToggle(t => t.setValue(!!this.plugin.settings.notifyApproval).onChange(async (v) => { this.plugin.settings.notifyApproval = v; await save(); }));
     new Setting(containerEl).setName('Waiting for your reply').setDesc('Alert when a long task (1 min or more) finishes, or a session has sat idle waiting for your reply.')
@@ -4610,13 +5116,16 @@ class BrainSettingTab extends PluginSettingTab {
       .addToggle(t => t.setValue(!!this.plugin.settings.notifyStuck).onChange(async (v) => { this.plugin.settings.notifyStuck = v; await save(); }));
     new Setting(containerEl).setName('Desktop notifications').setDesc('When Obsidian is in the background, also show a system notification.')
       .addToggle(t => t.setValue(!!this.plugin.settings.desktopNotify).onChange(async (v) => { this.plugin.settings.desktopNotify = v; await save(); }));
-    containerEl.createEl('h3', { text: 'Other' });
+    new Setting(containerEl).setName('Inspector').setHeading();
+    new Setting(containerEl).setName('Full call details').setDesc('Freeze the brain (Space) and click a travelling signal, or click an event in a session: you see everything Claude Code sent about that call. Every parameter of the command, which agent ran it and which call started that agent, what Claude said just before, the plan step, your prompt, where it went, its output, and the raw hook events. Kept in memory only for recent calls, never written to disk, gone when Obsidian closes.')
+      .addToggle(t => t.setValue(this.plugin.settings.callDetails !== false).onChange(async (v) => { this.plugin.settings.callDetails = v; if (!v) this.plugin.clearDetails(); await save(); }));
+    new Setting(containerEl).setName('Other').setHeading();
     new Setting(containerEl).setName('Decorative ambient activity').setDesc('When on, random neurons flicker softly. This is not real data; when off, everything that lights up is a real Claude Code event.')
       .addToggle(t => t.setValue(!!this.plugin.settings.ambient).onChange(async (v) => { this.plugin.settings.ambient = v; await save(); }));
     new Setting(containerEl).setName('Claude Code hooks on this computer').setDesc('Writes the hooks for every event into ~/.claude/settings.json (your other hooks stay, a backup is made). Restart running Claude Code sessions afterwards.')
       .addButton(b => b.setButtonText('Install').setCta().onClick(() => this.plugin.installLocalHooks()))
       .addButton(b => b.setButtonText('Copy JSON').onClick(() => this.plugin.copyHooks()));
-    new Setting(containerEl).setName('Show Claude writing its reply').setDesc('Adds the MessageDisplay hook: Broca\'s area lights up while the reply streams in. Only the length of each chunk is used. Reinstall the hooks after changing this.')
+    new Setting(containerEl).setName('Show Claude writing its reply').setDesc('Adds the MessageDisplay hook: Broca\'s area lights up while the reply streams in. The text itself is only kept in memory for the inspector (see Full call details). Reinstall the hooks after changing this.')
       .addToggle(t => t.setValue(this.plugin.settings.speechHook !== false).onChange(async (v) => { this.plugin.settings.speechHook = v; await save(); }));
     new Setting(containerEl).setName('Servers').setDesc('On a server reached through the tunnel, run this once (it installs the hook, queue and link scripts):  curl -s http://127.0.0.1:' + this.plugin.settings.port + '/install.sh | sh');
     new Setting(containerEl).setName('Demo').setDesc('Try the animation without a real session.')
@@ -4625,4 +5134,5 @@ class BrainSettingTab extends PluginSettingTab {
   }
 }
 
-module.exports = ClaudeBrainPlugin;
+AgentBrainPlugin.fromThisMachine = fromThisMachine;   // for the tests
+module.exports = AgentBrainPlugin;

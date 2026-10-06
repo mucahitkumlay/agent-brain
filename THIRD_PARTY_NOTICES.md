@@ -1,12 +1,31 @@
 # Third-party notices
 
-The plugin's code is MIT-licensed (see `LICENSE`). It bundles one library and draws on public neuroimaging data,
+Agent Brain's own code is MIT-licensed (see `LICENSE`). It bundles one library and draws on public neuroimaging data,
 each under its own terms below. The data files in `assets/` were built with `tools/anatomy/build_anat.py` from files
 distributed with the [niivue](https://github.com/niivue/niivue) project (`packages/niivue/demos/images`).
 
+## Summary
+
+| File | Derived from | Terms |
+|---|---|---|
+| `main.js` (release) | this repository + three.js | MIT (both) |
+| `assets/brain.bin.gz` | ICBM152 2009 surface (niivue `mni152_2009.mz3`) | ICBM licence below: keep the copyright notice |
+| `assets/t1.bin.gz` | ICBM152 2009 T1 template | ICBM licence below |
+| `assets/inner.bin.gz` | ventricles from the ICBM152 2009 T1; thalamus, caudate, putamen, pallidum, hippocampus, amygdala from AAL | ICBM licence below; AAL attribution below |
+| `assets/aal.bin.gz` | AAL atlas (one label per surface vertex) | AAL attribution below |
+| `assets/tracts.bin.gz` | HCP-1065 tractography atlas | **CC BY-SA 4.0** |
+
+### When you redistribute
+
+If you copy, fork, bundle or change the plugin or its data, you must keep with it: `LICENSE`, this file, the ICBM
+copyright notice, the AAL and HCP-1065 credits and citations, and the Human Connectome Project acknowledgement.
+Changes to `tracts.bin.gz` (or anything else adapted from the HCP-1065 atlas) must be shared under CC BY-SA 4.0, and
+you may not add terms or technical measures that restrict what CC BY-SA 4.0 allows. None of the data may be presented
+as endorsed by its authors, and none of it is fit for clinical use.
+
 ## three.js (bundled into `main.js`)
 
-MIT License. Copyright © 2010–2025 three.js authors. https://github.com/mrdoob/three.js
+MIT License. Copyright © 2010–2026 three.js authors. https://github.com/mrdoob/three.js
 
 > Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 > documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
@@ -25,7 +44,8 @@ https://www.mcgill.ca/bic/software/tools-data-analysis/anatomical-mri/atlases/ic
 > Permission to use, copy, modify, and distribute this software and its documentation for any purpose and without fee
 > is hereby granted, provided that the above copyright notice appear in all copies. The authors and McGill University
 > make no representations about the suitability of this software for any purpose. It is provided "as is" without
-> express or implied warranty.
+> express or implied warranty. The authors are not responsible for any data loss, equipment damage, property loss, or
+> injury to subjects or patients resulting from the use or misuse of this software package.
 
 Citations:
 - V.S. Fonov, A.C. Evans, K. Botteron, C.R. Almli, R.C. McKinstry, D.L. Collins and BDCG. Unbiased average
