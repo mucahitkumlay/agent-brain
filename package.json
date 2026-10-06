@@ -1,6 +1,6 @@
 {
   "name": "agent-brain",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Obsidian plugin: watch your AI coding agent (Claude Code for now) work as live activity on a real MRI brain. Local only, uses no tokens.",
   "private": true,
   "license": "MIT",

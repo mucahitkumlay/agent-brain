@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2
+- Sharper picture: the scene is now drawn with 4x multisample antialiasing (the canvas's own antialiasing never applied,
+  since everything goes through the bloom pass), so gyri, fibres and outlines no longer show jagged edges.
+- Auto quality starts at your screen's full resolution, never drops below it (it used to go down to 0.8x, which looked
+  blurry and blocky), and steps back up once frames are fast again. New "Maximum" setting: above screen resolution
+  with 8x antialiasing.
+
 ## 0.9.1
 - The project now lives at https://github.com/mucahitkumlay/agent-brain (the old address redirects). The anatomy files
   are fetched from releases there.

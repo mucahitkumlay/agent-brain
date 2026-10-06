@@ -756,26 +756,49 @@ class BrainView extends ItemView {
     // post-processing: bloom
     this.initAnatomy();
 
-    this.composer = new EffectComposer(renderer);
+    // the scene is drawn into an offscreen target for the bloom, so the canvas's own antialiasing never applies:
+    // the target itself is multisampled (MSAA) instead, which keeps gyri, fibres and outlines smooth
+    const q0 = this.qualityLevel();
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: q0.samples });
+    rt.texture.name = 'cb.scene';
+    this.composer = new EffectComposer(renderer, rt);
+    this.composer.setPixelRatio(q0.scale);
+    this.msaa = q0.samples;
     this.composer.addPass(new RenderPass(scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.4, 0.42, 0.42);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
   }
 
-  // render scale: the brain doesn't need retina resolution; "auto" steps down if frames run long
-  qualityScale() {
+  // render resolution and antialiasing. "Auto" starts sharp and steps down while frames run long, but never below the
+  // screen's own resolution with 2x MSAA, and steps back up once there is room again.
+  qualityLevel() {
     const dpr = window.devicePixelRatio || 1, q = this.plugin.settings.quality;
-    if (q === 'high') return Math.min(2, dpr);
-    if (q === 'low') return Math.min(1, dpr);
-    const steps = [Math.min(1.5, dpr), Math.min(1.25, dpr), Math.min(1, dpr), Math.min(0.8, dpr)];
+    const gl2 = !this.renderer || this.renderer.capabilities.isWebGL2 !== false;
+    const ms = (n) => gl2 ? Math.min(n, (this.renderer && this.renderer.capabilities.maxSamples) || n) : 0;
+    if (q === 'max') return { scale: Math.min(2, Math.max(dpr, 1.5)), samples: ms(8) };
+    if (q === 'high') return { scale: Math.min(2, dpr), samples: ms(4) };
+    if (q === 'low') return { scale: Math.min(1, dpr), samples: ms(2) };
+    const steps = [
+      { scale: Math.min(2, dpr), samples: ms(4) },
+      { scale: Math.min(1.5, dpr), samples: ms(4) },
+      { scale: Math.min(1.25, dpr), samples: ms(4) },
+      { scale: Math.min(1, dpr), samples: ms(4) },
+      { scale: Math.min(1, dpr), samples: ms(2) },
+    ].filter((x, i, a) => !i || x.scale !== a[i - 1].scale || x.samples !== a[i - 1].samples);
+    this.qMax = steps.length - 1;
     return steps[Math.min(this.qLevel || 0, steps.length - 1)];
   }
+  qualityScale() { return this.qualityLevel().scale; }
   applyQuality() {
     if (!this.renderer) return;
-    const r = this.qualityScale();
-    this.renderer.setPixelRatio(r);
-    this.composer.setPixelRatio(r);
+    const q = this.qualityLevel();
+    this.renderer.setPixelRatio(q.scale);
+    this.composer.setPixelRatio(q.scale);
+    if (q.samples !== this.msaa) {
+      for (const t of [this.composer.renderTarget1, this.composer.renderTarget2]) { t.samples = q.samples; t.dispose(); }
+      this.msaa = q.samples;
+    }
     this.resize();
     this.needsDraw = true;
   }
@@ -789,9 +812,21 @@ class BrainView extends ItemView {
     const expected = this.plugin.settings.fps === 30 ? 1000 / 30 : 1000 / 60;
     if (this.plugin.settings.quality !== 'auto') return;
     if (this.ft > expected * 1.35) {
+      this.fastSince = 0;
       if (!this.slowSince) this.slowSince = now;
-      else if (now - this.slowSince > 2500 && (this.qLevel || 0) < 3) { this.qLevel = (this.qLevel || 0) + 1; this.slowSince = 0; this.ft = expected; this.applyQuality(); }
-    } else this.slowSince = 0;
+      else if (now - this.slowSince > 3000 && (this.qLevel || 0) < (this.qMax || 0)) {
+        // a step up that made it slow again: stay at this level from now on
+        if (this.qUpAt && now - this.qUpAt < 20000) this.qCeil = (this.qLevel || 0) + 1;
+        this.qLevel = (this.qLevel || 0) + 1; this.slowSince = 0; this.ft = expected; this.qDownAt = now; this.applyQuality();
+      }
+    } else {
+      this.slowSince = 0;
+      // plenty of headroom for a while: try one step sharper
+      if ((this.qLevel || 0) > (this.qCeil || 0) && this.ft < expected * 1.08) {
+        if (!this.fastSince) this.fastSince = now;
+        else if (now - this.fastSince > 10000 && now - (this.qDownAt || 0) > 30000) { this.qLevel--; this.fastSince = 0; this.qUpAt = now; this.ft = expected; this.applyQuality(); }
+      } else this.fastSince = 0;
+    }
   }
 
   /* ---------- full anatomy: gyri, inner structures, fibre tracts, MRI slice ---------- */
@@ -5068,8 +5103,8 @@ class BrainSettingTab extends PluginSettingTab {
         .onChange(async (v) => { this.plugin.settings.glow = v; this.plugin.settings.bloom = true; await save(); this.plugin.forEachView(w => { w.needsDraw = true; }); }));
     new Setting(containerEl).setName('Glass opacity').setDesc('Lower: inner neurons and fibers show through more. Higher: a more opaque, realistic surface.')
       .addSlider(s => s.setLimits(0.2, 1, 0.02).setValue(this.plugin.settings.glass).setDynamicTooltip().onChange(async (v) => { this.plugin.settings.glass = v; await save(); }));
-    new Setting(containerEl).setName('Render quality').setDesc('Auto starts at 1.5x and steps down by itself if frames take too long. Low is lightest on laptops.')
-      .addDropdown(d => d.addOption('auto', 'Auto').addOption('high', 'High (retina)').addOption('low', 'Low').setValue(this.plugin.settings.quality)
+    new Setting(containerEl).setName('Render quality').setDesc('Auto renders at your screen\'s full resolution with 4x antialiasing, lowers it only while frames are slow (never below the screen\'s own resolution) and goes back up when there is room. Maximum renders above screen resolution with 8x antialiasing: the sharpest picture, heavier on the GPU. Low is lightest on laptops.')
+      .addDropdown(d => d.addOption('auto', 'Auto').addOption('max', 'Maximum').addOption('high', 'High').addOption('low', 'Low').setValue(this.plugin.settings.quality)
         .onChange(async (v) => { this.plugin.settings.quality = v; await save(); this.plugin.forEachView(view => { view.qLevel = 0; view.applyQuality(); }); }));
     new Setting(containerEl).setName('Frame rate').setDesc('Smooth renders every screen refresh while something moves. Battery renders every other refresh, at an even pace.')
       .addDropdown(d => d.addOption('60', 'Smooth').addOption('30', 'Battery').setValue(String(this.plugin.settings.fps))

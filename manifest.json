@@ -1,7 +1,7 @@
 {
   "id": "agent-brain",
   "name": "Agent Brain",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "minAppVersion": "1.4.0",
   "description": "Watch your AI coding agent work as live activity on a real MRI brain: sessions, subagents, every tool call and its result. Works with Claude Code for now. Local only; uses no tokens.",
   "author": "mucahitkumlay",
