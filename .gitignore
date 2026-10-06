@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dev/www/
+src/generated.js
+*.log
+.DS_Store
+Thumbs.db
+__pycache__/

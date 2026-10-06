@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  push:
+    tags: ['*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run build
+      - run: bun run test
+      - name: Check the tag matches the manifest
+        run: test "$(node -p "require('./manifest.json').version")" = "${GITHUB_REF_NAME}"
+      - name: Release (or refresh the files of an existing one)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FILES="dist/main.js dist/manifest.json dist/styles.css assets/aal.bin.gz assets/brain.bin.gz assets/inner.bin.gz assets/t1.bin.gz assets/tracts.bin.gz"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then gh release upload "$GITHUB_REF_NAME" $FILES --clobber
+          else gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes $FILES; fi

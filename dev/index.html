@@ -1,0 +1,40 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="styles.css">
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}.view-content{position:absolute;inset:0}.sb{position:fixed;right:8px;bottom:4px;color:#aaa;font:12px sans-serif}</style></head><body>
+<div id="leaf" class="view-content"></div><div class="sb" id="sb"></div>
+<script>
+(function(){
+const P=HTMLElement.prototype;
+P.createEl=function(tag,o={}){const e=document.createElement(tag);if(o.cls)e.className=o.cls;if(o.text)e.textContent=o.text;this.appendChild(e);return e;};
+P.createDiv=function(o){return this.createEl('div',o||{});};P.createSpan=function(o){return this.createEl('span',o||{});};
+P.empty=function(){this.innerHTML='';};P.addClass=function(c){this.classList.add(c);};P.removeClass=function(c){this.classList.remove(c);};
+P.toggleClass=function(c,b){this.classList.toggle(c,b);};P.setAttr=function(k,v){this.setAttribute(k,v);};P.setText=function(t){this.textContent=t;};P.appendText=function(t){this.appendChild(document.createTextNode(t));};P.hasClass=function(c){return this.classList.contains(c);};
+class Component{register(){} registerEvent(){} registerInterval(i){return i;} registerDomEvent(el,ev,fn,o){el.addEventListener(ev,fn,o);} }
+class ItemView extends Component{constructor(leaf){super();this.leaf=leaf;this.app=leaf.app;this.contentEl=document.getElementById('leaf');}}
+class Plugin extends Component{constructor(app,manifest){super();this.app=app;this.manifest=manifest;} async loadData(){return null;} async saveData(){} registerView(t,f){(window.__vf=window.__vf||{})[t]=f;} addRibbonIcon(){} addCommand(){} addSettingTab(){} addStatusBarItem(){return document.getElementById('sb');}}
+const obsidian={Plugin,ItemView,Notice:class{constructor(m){console.log(m)}},PluginSettingTab:class{},Setting:class{},setIcon:(el,n)=>{el.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="7"/></svg>';}};
+const httpMock={createServer(){return{on(){},listen(p,h,cb){setTimeout(cb,0)},close(){}}}};
+window.require=(n)=>n==='obsidian'?obsidian:n==='http'?httpMock:{};
+window.module={exports:{}}; window.exports=window.module.exports;
+})();
+</script>
+<script src="main.js"></script>
+<script>(function(){
+const groupsSpec=[['hubs/',13],['people/',120],['projects/api/',74],['notes/',60],['projects/docs/',17],['plugins/',22],['docs/',9],['kernel/',2],['references/',4],['journal/',30],['tools/',8],['security/',6]];
+const hubNames=['home','index','projects','people','api','docs','security','memory','plan','brief','agents','tools','glossary'];
+const files=[];for(const [g,c] of groupsSpec)for(let i=0;i<c;i++){const nm=g.includes('hubs')?hubNames[i]:g.split('/').filter(Boolean).pop()+'-'+i;files.push({path:g+nm+'.md',basename:nm});}
+const hubs=files.filter(f=>f.path.includes('hubs'));const rl={};
+let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+for(const f of files){if(f.path.includes('hubs'))continue;const o=rl[f.path]={};const k=1+Math.floor(rnd()*2.5);for(let i=0;i<k;i++)o[hubs[Math.floor(rnd()*rnd()*hubs.length)].path]=1;
+ const same=files.filter(x=>x.path.split('/').slice(0,2).join('/')===f.path.split('/').slice(0,2).join('/'));for(let i=0;i<Math.floor(rnd()*3);i++){const t=same[Math.floor(rnd()*same.length)];if(t!==f)o[t.path]=1;}}
+for(const h of hubs){const o=rl[h.path]=rl[h.path]||{};for(let i=0;i<4;i++)o[hubs[Math.floor(rnd()*hubs.length)].path]=1;}
+const leaves=[]; const vf={}; const files2=new Map();
+const mkLeaf=()=>{const l={app,async setViewState(st){l.view=window.__vf[st.type](l);await l.view.onOpen();}};leaves.push(l);return l;};
+const app={vault:{getName:()=>'notes',getMarkdownFiles:()=>files,configDir:'.obsidian',
+   getAbstractFileByPath:(p)=>files2.has(p)?{path:p}:(p==='Claude Activity'&&window.__folder?{path:p}:null),
+   createFolder:async(p)=>{window.__folder=true;}, create:async(p,c)=>{files2.set(p,c);}, modify:async(f,c)=>{files2.set(f.path,c);}, read:async(f)=>files2.get(f.path)||'',
+   adapter:{basePath:'/home/dev/notes',read:async()=>'{}',readBinary:async(p)=>{const n=p.split('/').pop();if(n.endsWith('.gz'))throw new Error('nf');const r=await fetch(n);if(!r.ok)throw new Error('nf');return await r.arrayBuffer();}}},
+ metadataCache:{resolvedLinks:rl,on(){return{}},getFileCache:()=>null},
+ workspace:{onLayoutReady(cb){setTimeout(cb,0)},getLeavesOfType:(t)=>leaves.filter(l=>l.view&&l.view.getViewType()===t),getLeaf(){return mkLeaf();},getRightLeaf(){return mkLeaf();},revealLeaf(){},openLinkText(p){window.__opened=p;}}};
+window.__files2=files2;
+window.__cbStart=async()=>{Object.assign(vf,window.__vf||{});const Cls=module.exports.default||module.exports;const p=new Cls(app,{dir:'.'});await p.onload();await p.activateView();window.plugin=p;window.view=leaves[0].view;};
+})();</script></body></html>

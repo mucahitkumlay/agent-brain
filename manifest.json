@@ -1,0 +1,10 @@
+{
+  "id": "claude-brain",
+  "name": "Claude Brain",
+  "version": "0.8.0",
+  "minAppVersion": "1.4.0",
+  "description": "Watch Claude Code work as live activity on a real MRI brain: sessions, subagents, every tool call and its result. Local only; uses no tokens.",
+  "author": "mucahitkumlay",
+  "authorUrl": "https://github.com/mucahitkumlay",
+  "isDesktopOnly": true
+}
