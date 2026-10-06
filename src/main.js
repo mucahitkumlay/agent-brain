@@ -764,7 +764,12 @@ class BrainView extends ItemView {
     const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: q0.samples });
     rt.texture.name = 'cb.scene';
     this.composer = new EffectComposer(renderer, rt);
-    this.composer.renderTarget2.samples = 0;   // only the scene needs MSAA: halves the video memory it takes
+    // The scene is always drawn into the composer's read buffer: that one is multisampled, the other one is never used
+    // (no pass swaps the buffers, see the OutputPass below), so it needs no MSAA. If the buffers did swap, every other
+    // frame would come out without antialiasing and the picture would flicker.
+    this.sceneRT = this.composer.readBuffer;
+    this.sceneRT.samples = q0.samples;
+    this.composer.writeBuffer.samples = 0;
     this.composer.setPixelRatio(q0.scale);
     this.msaa = q0.samples;
     // the GPU can drop the context (driver reset, too little video memory): stop drawing, and rebuild once it is back
@@ -773,7 +778,9 @@ class BrainView extends ItemView {
     this.composer.addPass(new RenderPass(scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.4, 0.42, 0.42);
     this.composer.addPass(this.bloom);
-    this.composer.addPass(new OutputPass());
+    const out = new OutputPass();
+    out.needsSwap = false;   // it draws to the screen; swapping after it would alternate the scene buffer each frame
+    this.composer.addPass(out);
   }
 
   // render resolution and antialiasing. "Auto" starts sharp and steps down while frames run long, but never below the
@@ -803,7 +810,7 @@ class BrainView extends ItemView {
     this.renderer.setPixelRatio(q.scale);
     this.composer.setPixelRatio(q.scale);
     if (q.samples !== this.msaa) {
-      const t = this.composer.renderTarget1; t.samples = q.samples; t.dispose();
+      const t = this.sceneRT || this.composer.readBuffer; t.samples = q.samples; t.dispose();
       this.msaa = q.samples;
     }
     this.resize();   // a new pixel ratio is a real resize: it redraws at once

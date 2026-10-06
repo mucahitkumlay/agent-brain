@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.6
+- Fixes the fast flicker in 0.9.5: the post-processing swapped its two buffers after every frame, and only one of them
+  was antialiased, so every other frame came out with jagged edges. The scene now always goes into the same
+  multisampled buffer.
+
 ## 0.9.5
 - Much lighter on the GPU:
   - Adaptive frame rate (new default): 60 fps only while you drag, zoom, replay or inspect; 30 fps for the slow ambient

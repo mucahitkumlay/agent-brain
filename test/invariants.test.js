@@ -18,3 +18,4 @@ ok(/if \(!fromThisMachine\(req\.headers\)\)/.test(code), 'requests a web page co
 ok(!/res\.end\(\s*JSON\.stringify|"decision"|permissionDecision/.test(code), 'hook answers never carry a decision: it only watches');
 ok(/writeFileSync\(file, JSON\.stringify\(cfg/.test(code) && (code.match(/writeFileSync\(/g) || []).length === 2, 'files written outside Obsidian\'s API: only Claude Code\'s settings, on Install');
 ok(!/saveData\([^)]*details/.test(code) && /saveData\(Object\.assign\(\{\}, this\.settings, \{ memory: this\.memory, learned: this\.learned, daily: this\.daily, engram: eng, regions: this\.regionMem \}\)\)/.test(code), 'call details are never saved to data.json');
+ok(/out\.needsSwap = false/.test(code) && /this\.sceneRT = this\.composer\.readBuffer/.test(code), 'the scene is always drawn into the same multisampled buffer (no flicker between frames)');
