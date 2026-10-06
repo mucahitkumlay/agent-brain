@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.4
+- First release built by GitHub Actions from `package-lock.json`, with build-provenance attestations. Same plugin as
+  0.9.3.
+
 ## 0.9.3
 - Releases carry only `main.js`, `manifest.json` and `styles.css`. The anatomy files moved to their own release
   (`anatomy-1`), still downloaded once and checked by SHA-256.
