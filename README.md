@@ -107,6 +107,10 @@ Claude Code running on a remote machine reaches the plugin through a reverse SSH
 | <kbd>L</kbd> <kbd>M</kbd> <kbd>V</kbd> | Anatomy layers, MRI slice, look (anatomy or atlas) |
 | <kbd>F</kbd> <kbd>R</kbd> <kbd>H</kbd> <kbd>I</kbd> | Follow activity, reset view, hide everything, numbers and shortcuts |
 
+It adapts to the computer it runs on: it recognises the GPU, measures how long each frame takes and picks a resolution,
+antialiasing and frame rate that keep dragging and zooming smooth (the Info panel, <kbd>I</kbd>, shows what it chose).
+On a slow machine, Settings → Frame rate → Battery and Render quality → Low make it lighter still.
+
 Click a session for its plan, agents, energy and recent events (click an event for everything about it); a gyrus or
 nucleus for its memory; a note to open it.
 The command palette has a demo (**Agent Brain: Play demo session**) if you want to see it without a real session.

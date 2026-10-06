@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.7
+- Smooth zooming: the wheel sets a target and the camera eases to it, so zoom stays fluid even when frames are slow.
+- Neurons and signals have a maximum size on screen: close up they used to grow to hundreds of pixels each, with
+  additive blending, which made zooming in very heavy.
+- Auto quality knows the GPU: it reads what kind it is (dedicated, integrated, software) to choose where to start,
+  measures the real GPU time per frame where the browser allows it, and keeps a quality at which dragging and
+  zooming run at 60 fps (stepping back up, at most once a minute, when there is plenty of room). Without a GPU
+  (software rendering) the glow is turned off.
+- While you drag or zoom, a GPU that cannot keep 60 fps gets an even 30 instead of a stuttering rate.
+- The composer's unused second buffer is kept at 1×1 pixel: less video memory.
+- The Info panel (I) shows the GPU, the render scale, the antialiasing and the GPU time per frame.
+
 ## 0.9.6
 - Fixes the fast flicker in 0.9.5: the post-processing swapped its two buffers after every frame, and only one of them
   was antialiased, so every other frame came out with jagged edges. The scene now always goes into the same

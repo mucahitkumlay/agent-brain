@@ -212,6 +212,17 @@ function responseSize(r) {
   if (typeof r === 'object') { let n = 0; for (const k of ['stdout', 'stderr', 'content', 'output', 'result', 'text']) if (typeof r[k] === 'string') n += r[k].length; else if (Array.isArray(r[k])) n += r[k].length * 200; return n; }
   return 0;
 }
+// what kind of GPU draws the brain: 0 = software (no GPU), 1 = integrated, 2 = dedicated or Apple silicon
+function gpuTier(name) {
+  if (/swiftshader|llvmpipe|softpipe|basic render|software/i.test(name)) return 0;
+  if (/nvidia|geforce|quadro|rtx|gtx|radeon (rx|pro)|\brx ?\d{3,4}|apple m\d|apple gpu|arc\(tm\) a\d|arc a\d/i.test(name)) return 2;
+  return 1;
+}
+function gpuInfo(gl) {
+  let name = '';
+  try { const ext = gl.getExtension('WEBGL_debug_renderer_info'); name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || ''); } catch (e) { /* hidden by the browser */ }
+  return { name: name.replace(/\s+/g, ' ').slice(0, 120), tier: gpuTier(name) };
+}
 // requests a browser page could make carry an Origin (a web origin) or Sec-Fetch-Site header; Claude Code's hooks,
 // its telemetry exporter, curl and the tunnel send neither, and always address 127.0.0.1 / localhost
 function fromThisMachine(h) {
@@ -409,12 +420,12 @@ void main() {
 }`;
 const POINT_VS = `
 attribute float aSize; attribute vec3 aColor; attribute float aGlow;
-uniform float uScale;
+uniform float uScale; uniform float uMaxPx;
 varying vec3 vC; varying float vG;
 #include <clipping_planes_pars_vertex>
 void main() {
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-  gl_PointSize = aSize * uScale / -mvPosition.z * (1.0 + aGlow * 1.8);
+  gl_PointSize = min(aSize * uScale / -mvPosition.z * (1.0 + aGlow * 1.8), uMaxPx);
   vC = aColor; vG = aGlow;
   gl_Position = projectionMatrix * mvPosition;
   #include <clipping_planes_vertex>
@@ -660,9 +671,14 @@ class BrainView extends ItemView {
       m.aalLobes = true;
     }
     const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: 'high-performance' });
-    // start where auto quality settled last time on this screen, so it doesn't walk down the steps again at every start
-    const al = this.plugin.settings.autoLevel;
-    this.qLevel = al && al.dpr === (window.devicePixelRatio || 1) ? Math.max(0, al.level | 0) : 0;
+    this.qLevel = 0;
+    this.gl = renderer.getContext();
+    this.gpu = gpuInfo(this.gl);
+    this.initGpuTimer();
+    // start where auto quality settled last time on this screen and GPU; otherwise from what kind of GPU this is
+    const al = this.plugin.settings.autoLevel, dpr0 = window.devicePixelRatio || 1;
+    if (al && al.dpr === dpr0 && al.gpu === this.gpu.name) this.qLevel = Math.max(0, al.level | 0);
+    else this.qLevel = this.levelFor(this.gpu.tier === 2 ? { scale: 1.5, samples: 4 } : this.gpu.tier === 1 ? { scale: 1, samples: 2 } : { scale: 0.85, samples: 0 });
     renderer.setPixelRatio(this.qualityScale());
     renderer.setClearColor(0x030407, 1);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -804,6 +820,36 @@ class BrainView extends ItemView {
     return steps[Math.min(this.qLevel || 0, steps.length - 1)];
   }
   qualityScale() { return this.qualityLevel().scale; }
+  // the first auto step no sharper than this
+  levelFor(want) {
+    const keep = this.qLevel; let i = 0;
+    for (this.qLevel = 0; this.qLevel <= 8; this.qLevel++) { const q = this.qualityLevel(); i = this.qLevel; if (q.scale <= want.scale + 1e-6 && q.samples <= want.samples) break; if (this.qLevel >= (this.qMax || 0)) break; }
+    this.qLevel = keep;
+    return i;
+  }
+  // GPU time per frame, measured by the GPU itself where the browser allows it (EXT_disjoint_timer_query_webgl2)
+  initGpuTimer() {
+    try { this.tq = this.gl.getExtension('EXT_disjoint_timer_query_webgl2'); } catch (e) { this.tq = null; }
+    this.tqList = []; this.tqActive = null; this.gpuMs = null;
+  }
+  gpuBegin() {
+    if (!this.tq || this.tqActive || this.tqList.length > 4) return false;
+    const q = this.gl.createQuery(); if (!q) return false;
+    this.gl.beginQuery(this.tq.TIME_ELAPSED_EXT, q); this.tqActive = q; return true;
+  }
+  gpuEnd() { if (!this.tqActive) return; this.gl.endQuery(this.tq.TIME_ELAPSED_EXT); this.tqList.push(this.tqActive); this.tqActive = null; }
+  gpuPoll() {
+    const gl = this.gl, tq = this.tq;
+    if (!tq || !this.tqList.length) return;
+    const disjoint = gl.getParameter(tq.GPU_DISJOINT_EXT);
+    while (this.tqList.length) {
+      const q = this.tqList[0];
+      if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) break;
+      const ns = gl.getQueryParameter(q, gl.QUERY_RESULT);
+      gl.deleteQuery(q); this.tqList.shift();
+      if (!disjoint && ns > 0) { const ms = ns / 1e6; this.gpuMs = this.gpuMs == null ? ms : this.gpuMs * 0.85 + ms * 0.15; }
+    }
+  }
   applyQuality() {
     if (!this.renderer) return;
     const q = this.qualityLevel();
@@ -825,6 +871,12 @@ class BrainView extends ItemView {
       this.onClose().then(() => this.onOpen());
     } catch (e) { console.error('[agent-brain] could not rebuild after a GPU reset', e); }
   }
+  setAutoLevel(level, now) {
+    if (level > (this.qLevel || 0)) this.qDownAt = now;
+    this.qLevel = level; this.slowSince = 0; this.fastSince = 0; this.load = 1; this.load60 = 0; this.gpuMs = null; this.gpu60 = undefined;
+    this.applyQuality();
+    this.plugin.settings.autoLevel = { dpr: window.devicePixelRatio || 1, gpu: this.gpu ? this.gpu.name : '', level }; this.plugin.saveAll();
+  }
   // frame timing: rolling average of the interval between consecutive drawn frames
   trackFrame(now) {
     const prev = this.lastFrameAt;
@@ -834,15 +886,34 @@ class BrainView extends ItemView {
     this.ft = this.ft ? this.ft * 0.94 + dtm * 0.06 : dtm;
     const expected = 1000 / (this.fpsTarget || 60);
     this.load = this.load ? this.load * 0.94 + (dtm / expected) * 0.06 : dtm / expected;   // 1 = on time
+    // can this GPU draw 60 frames a second at this quality? (used while you drag or zoom)
+    const timed = this.gpuMs != null;
+    if (timed) this.gpu60 = this.gpuMs < 12.5;
+    else if (this.fpsTarget === 60) this.load60 = this.load60 ? this.load60 * 0.9 + (dtm / expected) * 0.1 : dtm / expected;
+    if (!timed && this.load60 > 1.25) this.gpu60 = false;
     if (this.plugin.settings.quality !== 'auto') return;
-    // a step only ever goes down (each one reallocates the buffers, so going back and forth would stutter)
-    if (this.load > 1.3) {
+    const lvl = this.qLevel || 0;
+    // too slow for a while: one step down. Plenty of room for a long time: one step up, at most once a minute, and
+    // never back to a step that was too slow before. With the GPU's own timer this reacts in two seconds.
+    // with the GPU's own timer: aim for a quality that can draw 60 fps (smooth dragging and zooming), down to the
+    // screen's resolution without antialiasing; below that, only if even 30 fps fails
+    if (this.lvlPlain == null) this.lvlPlain = this.levelFor({ scale: 1, samples: 0 });
+    const heavy = timed ? this.gpuMs > 25 || (this.gpuMs > 14.5 && lvl < this.lvlPlain) : this.load > 1.3;
+    const light = timed && this.gpuMs < 5;
+    if (heavy) {
+      this.fastSince = 0;
       if (!this.slowSince) this.slowSince = now;
-      else if (now - this.slowSince > 5000 && (this.qLevel || 0) < (this.qMax || 0)) {
-        this.qLevel = (this.qLevel || 0) + 1; this.slowSince = 0; this.load = 1; this.applyQuality();
-        this.plugin.settings.autoLevel = { dpr: window.devicePixelRatio || 1, level: this.qLevel }; this.plugin.saveAll();
+      else if (now - this.slowSince > (timed ? 2000 : 5000) && lvl < (this.qMax || 0)) {
+        if (this.qUpAt && now - this.qUpAt < 30000) this.qCeil = lvl + 1;   // the last step up was one too many
+        this.setAutoLevel(lvl + 1, now);
       }
-    } else this.slowSince = 0;
+    } else {
+      this.slowSince = 0;
+      if (light && lvl > (this.qCeil || 0) && now - (this.qDownAt || 0) > 60000) {
+        if (!this.fastSince) this.fastSince = now;
+        else if (now - this.fastSince > 20000) { this.qUpAt = now; this.setAutoLevel(lvl - 1, now); }
+      } else this.fastSince = 0;
+    }
   }
 
   /* ---------- full anatomy: gyri, inner structures, fibre tracts, MRI slice ---------- */
@@ -1145,7 +1216,7 @@ class BrainView extends ItemView {
     g.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(n), 1));
     const mat = new THREE.ShaderMaterial({
       vertexShader: POINT_VS, fragmentShader: POINT_FS,
-      uniforms: { uScale: { value: 300 }, uRing: { value: 0 } },
+      uniforms: { uScale: { value: 300 }, uRing: { value: 0 }, uMaxPx: { value: 48 } },
       transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending, clipping: true,
     });
     if (this.clipOn) mat.clippingPlanes = [this.clipPlane];
@@ -1393,6 +1464,7 @@ class BrainView extends ItemView {
       this.renderer.setSize(w, h, false);
       this.canvas.style.width = w + 'px'; this.canvas.style.height = h + 'px';
       this.composer.setSize(w, h);
+      if (this.composer.writeBuffer !== this.sceneRT) this.composer.writeBuffer.setSize(1, 1);   // never used, see initGL
       this.bloom.setSize(Math.max(2, Math.round(w / 2)), Math.max(2, Math.round(h / 2)));
       this.overlay.width = Math.floor(w * dpr); this.overlay.height = Math.floor(h * dpr);
     }
@@ -1466,7 +1538,8 @@ class BrainView extends ItemView {
     let drag = null, moved = false;
     this.registerDomEvent(c, 'wheel', (e) => {
       e.preventDefault();
-      this.view.dist = Math.min(1200, Math.max(140, this.view.dist * Math.exp(e.deltaY * 0.0012)));
+      const from = this.view.distT != null ? this.view.distT : this.view.dist;
+      this.view.distT = Math.min(1200, Math.max(140, from * Math.exp(e.deltaY * 0.0012)));
       this.lastInteract = performance.now();
     }, { passive: false });
     this.registerDomEvent(c, 'mousedown', (e) => {
@@ -1946,7 +2019,7 @@ class BrainView extends ItemView {
     this.flashT = window.setTimeout(() => this.flashEl && this.flashEl.removeClass('is-on'), 1400);
   }
 
-  resetCamera() { Object.assign(this.view, { yaw: -1.15, pitch: 0.22, dist: this.mini ? 300 : 430, panX: 0, panY: 0 }); this.lastInteract = -1e9; this.needsDraw = true; }
+  resetCamera() { Object.assign(this.view, { yaw: -1.15, pitch: 0.22, dist: this.mini ? 300 : 430, distT: null, panX: 0, panY: 0 }); this.lastInteract = -1e9; this.needsDraw = true; }
 
   toggleMinimal() {
     this.plugin.settings.minimal = !this.plugin.settings.minimal;
@@ -3028,7 +3101,8 @@ class BrainView extends ItemView {
         c.createSpan({ cls: 'cb-kpi-v', text: '$' + tt.cost.toFixed(2) }); c.createSpan({ cls: 'cb-kpi-k', text: 'cost today' });
         c.setAttr('title', 'The cost Claude Code reports for these model calls (an estimate at API prices).');
       }
-      kpi(fps, 'fps', 0, `Render scale ${this.qualityScale().toFixed(2)}x.`);
+      const ql = this.qualityLevel();
+      kpi(fps, 'fps', 0, `Render scale ${ql.scale.toFixed(2)}x, ${ql.samples ? ql.samples + 'x antialiasing' : 'no antialiasing'}${this.gpuMs != null ? `, ${this.gpuMs.toFixed(1)} ms of GPU time a frame` : ''}. GPU: ${(this.gpu && this.gpu.name) || 'unknown'}.`);
       this.srcEl.empty();
       for (const x of [...p.sources.values()].sort((m, n) => (m.name === 'local' ? 0 : 1) - (n.name === 'local' ? 0 : 1))) {
         const st = p.sourceState(x);
@@ -3051,6 +3125,11 @@ class BrainView extends ItemView {
     this.last = now;
     const dt = this.frozen ? 0 : dt0 * (this.timeScale || 1);   // frozen: nothing travels, but you can still turn the brain around
     this.simT = (this.simT || 0) + dt;
+    // zoom eases towards where the wheel left it
+    const v0 = this.view;
+    this.zooming = v0.distT != null && Math.abs(v0.distT - v0.dist) > 0.05;
+    if (this.zooming) { v0.dist += (v0.distT - v0.dist) * (1 - Math.exp(-dt0 * 14)); this.lastInteract = Math.max(this.lastInteract, now - 300); }
+    else if (v0.distT != null) { v0.dist = v0.distT; v0.distT = null; }
     const idle = now - this.lastInteract > 5000;
     const following = !this.frozen && this.followCamera(dt, now);
     const rotating = !this.frozen && !following && this.plugin.settings.autoRotate && idle;
@@ -3067,12 +3146,16 @@ class BrainView extends ItemView {
     // the background. Capped at 60 on high-refresh screens. Halves the GPU work most of the time.
     const fr = this.plugin.settings.frameRate || 'auto';
     const lively = interacting || !!this.replay || (!this.frozen && (this.timeScale || 1) < 1);
-    const target = fr === '60' ? 60 : fr === '30' ? (interacting ? 60 : 30) : lively ? 60 : !document.hasFocus() ? 20 : 30;
+    const fast = this.gpu60 !== false ? 60 : 30;   // an even 30 feels smoother than a stuttering 45
+    const target = fr === '60' ? fast : fr === '30' ? (interacting ? fast : 30) : lively ? fast : !document.hasFocus() ? 20 : 30;
     if (target !== this.fpsTarget) { this.fpsTarget = target; this.lastFrameAt = 0; }
     if (now - (this.lastDraw || 0) < 1000 / target - 3) return;
     this.lastDraw = now;
     this.needsDraw = false;
+    this.gpuPoll();
+    const timed = this.gpuBegin();
     this.draw();
+    if (timed) this.gpuEnd();
     this.drawEeg();
     this.trackFrame(now);
   }
@@ -3485,6 +3568,7 @@ class BrainView extends ItemView {
       ng.attributes.position.needsUpdate = true; ng.attributes.aColor.needsUpdate = true; ng.attributes.aSize.needsUpdate = true; ng.attributes.aGlow.needsUpdate = true;
       this.nodeObj.material.uniforms.uScale.value = this.cssH * 0.9 * Math.min(2, window.devicePixelRatio || 1);
       this.nodeObj.material.uniforms.uRing.value = LK.ring;
+      this.nodeObj.material.uniforms.uMaxPx.value = 44 * this.renderer.getPixelRatio();
     }
     if (this.linkObj) this.linkObj.material.opacity = LK.link;
     if (this.learnObj) this.learnObj.material.opacity = LK.learn;
@@ -3528,6 +3612,7 @@ class BrainView extends ItemView {
       }
       this.spikeObj.material.uniforms.uScale.value = this.nodeObj ? this.nodeObj.material.uniforms.uScale.value : 300;
       this.spikeObj.material.uniforms.uRing.value = LK.ring * 0.5;
+      this.spikeObj.material.uniforms.uMaxPx.value = 36 * this.renderer.getPixelRatio();
     }
     {
       const on = this.plugin.settings.memoryTrace !== false, K = this.plugin.engK(), vl = this.vitalLevel || 0;
@@ -3553,7 +3638,7 @@ class BrainView extends ItemView {
     }
     this.updateClip();
     const glow = this.plugin.settings.bloom === false ? 0 : Number(this.plugin.settings.glow);
-    this.bloom.enabled = glow > 0.02;
+    this.bloom.enabled = glow > 0.02 && !(this.gpu && this.gpu.tier === 0);
     this.bloom.strength = 0.9 * glow * LK.bloom;
     this.composer.render();
     this.drawOverlay();
@@ -5203,4 +5288,5 @@ class BrainSettingTab extends PluginSettingTab {
 }
 
 AgentBrainPlugin.fromThisMachine = fromThisMachine;   // for the tests
+AgentBrainPlugin.gpuTier = gpuTier;
 module.exports = AgentBrainPlugin;
