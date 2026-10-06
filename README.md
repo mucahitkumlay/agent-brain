@@ -46,6 +46,39 @@ no tokens.
 - **Energy.** With Claude Code's telemetry on, every model call shows as a slow, warm response in prefrontal cortex
   (bigger with more output); context read from cache lights the hippocampus; each session shows its working memory,
   tokens and cost.
+- **Reality check.** Signs that the agent believes something that is not so: a file, command, package, module or web
+  page that does not exist; text it tries to change that is not in the file; code that uses a name its own search found
+  nowhere; a turn that ends with "the tests pass" or "fixed" when the last run failed or no test ran. The insula and
+  cingulate light violet (a prediction error), and the session lists each finding with its evidence. Hints, not proof.
+- **Guard.** Destructive commands (`rm -rf` outside build folders, `git push --force`, `reset --hard`, `DROP TABLE`,
+  `terraform destroy`, `curl | sh`, …) and secrets written out on a command line or into a file light orange and
+  notify you. It only watches; nothing is stopped. Keys and tokens are masked everywhere the plugin shows them.
+- **Injection shield.** Content from outside (a web page, a search, an email, an issue) can carry instructions. When
+  the agent reads such content and then reads credentials, sends data out, dumps secrets or changes startup files, or
+  when the content itself talks to the agent ("ignore previous instructions"), you see it with the chain that led there.
+
+  ![Injection shield](docs/images/injection-shield.png)
+
+- **Evidence and turn report.** Click a finished turn: what it rests on (files read, searches, pages, commands), a time
+  map of its tool calls, thinking time, time spent waiting for your approval, failures, retries and cost. A long answer
+  about specific files when nothing was read or run is marked.
+
+  ![Turn report and evidence](docs/images/turn-report.png)
+
+- **Lessons.** Short facts per project from what went wrong and right: the test command that works, a command that is
+  not installed, a package that does not exist, a command that keeps failing. Copy them into the project's `CLAUDE.md`
+  or write them to a note.
+- **Autopsy, replays and comparison.** A session's key moments (first failure, loops, findings, slow calls, waits); a
+  shareable replay file without names, paths, prompts, addresses or secrets, which anyone can play on their own brain;
+  two sessions side by side; and a project map of hot files and files that change together.
+
+  ![Session autopsy](docs/images/autopsy.png)
+
+- **Setup check and themes.** One panel says what is in place and what is missing (opens by itself on the first run).
+  Themes: Night, fMRI, Match Obsidian, and High contrast with colour-blind safe (Okabe-Ito) region colours.
+
+  ![High contrast theme](docs/images/theme-contrast.png)
+
 - **Is it stuck?** A command failing again and again, the same command re-run with nothing changed, a file edited
   over and over, API errors piling up, a command running for 20 minutes, or no progress for 10: the anterior cingulate
   pulses red and you get a notification.
@@ -111,8 +144,27 @@ It adapts to the computer it runs on: it recognises the GPU, measures how long e
 antialiasing and frame rate that keep dragging and zooming smooth (the Info panel, <kbd>I</kbd>, shows what it chose).
 On a slow machine, Settings → Frame rate → Battery and Render quality → Low make it lighter still.
 
-Click a session for its plan, agents, energy and recent events (click an event for everything about it); a gyrus or
-nucleus for its memory; a note to open it.
+Click a session for its findings, last turn, plan, agents, energy and recent events (click an event for everything
+about it); a gyrus or nucleus for its memory; a note to open it. Under *Look closer*: autopsy, project map, lessons,
+export replay and compare. Command palette: **Check the setup**, **Show lessons learned per project**, **Session
+autopsy**, **Project map**, **Export a shareable replay**, **Play a replay file**.
+
+### Other agents
+
+Any agent can report to the same brain by posting JSON (one event or a list) to `http://127.0.0.1:27182/agent`:
+
+```json
+{ "agent": "my-agent", "session": "42", "cwd": "/path/to/project", "type": "tool", "tool": "Bash", "id": "c1", "input": { "command": "npm test" } }
+```
+
+`type` is `start`, `prompt` (`text`), `tool` (`tool`, `input`, `id`), `result` (`id`, `output`), `error` (`id`, `output`),
+`wait`, `stop` (`text`) or `end`. They become the same events Claude Code's hooks send, so every feature works for them.
+
+### Coach mode (off by default)
+
+With *Coach mode* on (Settings → Alerts) and the hooks installed again, guard, shield and important reality-check
+findings go back to Claude Code as context on its next tool result (`[Agent Brain, an observer the user installed] …`),
+so the agent can check itself. It is only a note: never a decision, never a block.
 The command palette has a demo (**Agent Brain: Play demo session**) if you want to see it without a real session.
 
 ## Disclosures
@@ -122,7 +174,9 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
 | **Network** | One request per anatomy file, once: the download from this repository's anatomy release, checked by SHA-256. No telemetry, no analytics, no other servers. |
 | **Local server** | An HTTP listener on `127.0.0.1` only, so Claude Code's hooks can report to it. |
 | **Files outside the vault** | Uses Node's `fs` only when you press *Install* for the hooks: it edits `~/.claude/settings.json` (with a backup) and removes an older copy of the hooks from the vault's `.claude` settings. |
-| **Vault files** | Lists your notes to place them as neurons; reads and writes only the optional daily activity note. |
+| **Vault files** | Lists your notes to place them as neurons; writes only what you ask for: the optional daily activity note, lessons notes and replay files (in the activity folder). |
+| **Reading `~/.claude/settings.json`** | The setup check reads it to tell you whether the hooks and telemetry are in place. |
+| **Answers to Claude Code** | Empty, except with *Coach mode* on (off by default): then a finding may come back as context. Never a decision. |
 | **Clipboard** | Writes to it only when you press a *Copy* button. Never reads it. |
 | **Account, payment, ads** | None. |
 
@@ -134,7 +188,8 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
 - **Files outside your vault:** only when you press *Install* for the hooks, the plugin edits `~/.claude/settings.json`
   (Claude Code's user settings; a backup is written next to it). Nothing else outside the vault is read or written.
 - **Stored in the plugin's `data.json`:** settings, the activity trace, short labels of what happened in each region
-  (file names and program names, never command lines), learned file connections and today's counters.
+  (file names and program names, never command lines), learned file connections, today's counters and lessons
+  (program names, file names and short sentences, never command lines, paths or secrets).
 - **Kept in memory only:** the timeline and, with *Full call details* on (the default), what Claude Code sends about
   each recent call — parameters, output, your prompt, Claude's reply text — so the inspector can show it. It is capped
   (about 24 million characters, oldest dropped first), never written to disk and gone when Obsidian closes. Turn it off
@@ -164,7 +219,12 @@ npm test             # unit tests against dist/main.js
   share, or turn *Full call details* off.
 - **Event content is data, never instructions.** Text from prompts, commands, files or tool output is only displayed,
   as plain text. The plugin does not execute it, open it, follow its links or send it to a model, and its listener
-  answers every hook with an empty response, so it can never approve, block or change what the agent does.
+  answers every hook with an empty response, so it can never approve, block or change what the agent does. The one
+  exception is *Coach mode*, off unless you turn it on: then it can add a note as context, still never a decision.
+- **Guard and shield are hints, not protection.** They watch; they do not stop anything, and they miss what they do
+  not know. Keep Claude Code's own permission settings and sandboxing on.
+- **Check a replay before you share it.** Exported replays drop prompts, replies, paths, addresses and secrets they
+  recognise, but read the file before you post it.
 - **Keep the listener local.** It binds to `127.0.0.1` and refuses requests that look like they come from a web page.
   Do not expose the port to a network; reach servers only through the SSH tunnel you start.
 

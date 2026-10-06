@@ -54,6 +54,7 @@ export const GYRI = {
   memory: both('Hippocampus', 'ParaHippocampal'),                // recall and consolidation
   self: both('Precuneus', 'Cingulum_Post'),                      // instructions and settings: the model of itself
   alarm: both('Cingulum_Ant', 'Frontal_Med_Orb'),                // conflict: permissions, denials, errors
+  doubt: both('Insula', 'Cingulum_Ant'),                         // prediction error: what the agent believed and what was there differ
   reward: both('Frontal_Med_Orb', 'Rectus'),                     // a task done
   place: both('ParaHippocampal', 'Precuneus'),                   // moving to another folder or worktree
   sense: both('Postcentral'),                                    // something changed on disk

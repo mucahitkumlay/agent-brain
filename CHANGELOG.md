@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.11.0
+- Guard: destructive commands (rm -rf outside build folders, git push --force, reset --hard, clean -fd, DROP TABLE,
+  DELETE without WHERE, terraform destroy, kubectl delete, curl | sh, chmod 777, …) and secrets on a command line or
+  written into a file light orange and notify you. Nothing is stopped. Keys and tokens are masked in the inspector, the
+  log, the timeline and the daily note.
+- Injection shield: content from the web, search, email or issues followed by reading credentials, sending data out,
+  dumping secrets or changing startup files, and content that addresses the agent ("ignore previous instructions").
+- Evidence: each finished turn keeps what it rests on (files, searches, pages, commands), shown under "Based on". A long
+  answer about specific files with nothing read or run is marked.
+- Turn report: a time map of the tool calls, thinking time, time waiting for your approval, failures, retries, files
+  changed and cost, in the session panel ("Last turn") and on the finished turn.
+- Lessons per project (the test command that works, commands that are not installed, packages that do not exist,
+  commands that keep failing), with "Copy for CLAUDE.md" and "Write to note".
+- Session autopsy, shareable replays (exported without names, paths, prompts, addresses or secrets; "Play a replay
+  file" plays one on your brain without touching your memory), comparison of two sessions, and a project map.
+- Setup check (opens on the first run), themes (Night, fMRI, Match Obsidian, High contrast with Okabe-Ito colours).
+- Other agents can post events to `/agent` (a small generic format, see the README).
+- Coach mode, off by default: findings can go back to Claude Code as context on its next tool result. Never a decision.
+- Fix: "Tests: 0 failed" no longer counts as a failed run.
+- The demo uses made-up projects and files only: nothing from your vault or your computer appears in it.
+
+## 0.10.0
+- Reality check: signs that the agent believes something that is not so. A file, command, package, module, npm script,
+  git path or web page that does not exist; an edit of text that is not in the file; a change to a file it has not
+  read; code that uses a name its own search just found nowhere; and, at the end of a turn, "the tests pass", "the
+  build works" or "fixed" when the last run failed or no test ran. Each finding sends a violet prediction-error signal
+  into the insula and cingulate, is listed in the session panel with a link to its evidence, appears in the operation
+  tree, and (for claims) notifies you. Settings → Alerts → Reality check.
+- The demo shows a finding or two.
+
 ## 0.9.7
 - Smooth zooming: the wheel sets a target and the camera eases to it, so zoom stays fluid even when frames are slow.
 - Neurons and signals have a maximum size on screen: close up they used to grow to hundreds of pixels each, with
