@@ -51,8 +51,11 @@ no tokens.
   nowhere; a turn that ends with "the tests pass" or "fixed" when the last run failed or no test ran. The insula and
   cingulate light violet (a prediction error), and the session lists each finding with its evidence. Hints, not proof.
 - **Guard.** Destructive commands (`rm -rf` outside build folders, `git push --force`, `reset --hard`, `DROP TABLE`,
-  `terraform destroy`, `curl | sh`, …) and secrets written out on a command line or into a file light orange and
-  notify you. It only watches; nothing is stopped. Keys and tokens are masked everywhere the plugin shows them.
+  `terraform destroy`, `curl | sh`, and their Windows and PowerShell forms: `rmdir /s`, `Remove-Item -Recurse`,
+  `irm | iex`, …), risky lines inside a script the agent writes, and secrets written out on a command line or into a
+  file (tokens, passwords after `-p` or `--password`, passwords in a URL, private keys) light orange and notify you.
+  It only watches; nothing is stopped. Keys and tokens are masked everywhere the plugin shows them. A finding that is
+  normal in a project can be marked with *This is normal here* (undo in the settings).
 - **Injection shield.** Content from outside (a web page, a search, an email, an issue) can carry instructions. When
   the agent reads such content and then reads credentials, sends data out, dumps secrets or changes startup files, or
   when the content itself talks to the agent ("ignore previous instructions"), you see it with the chain that led there.
@@ -173,11 +176,11 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
 |---|---|
 | **Network** | One request per anatomy file, once: the download from this repository's anatomy release, checked by SHA-256. No telemetry, no analytics, no other servers. |
 | **Local server** | An HTTP listener on `127.0.0.1` only, so Claude Code's hooks can report to it. |
-| **Files outside the vault** | Uses Node's `fs` only when you press *Install* for the hooks: it edits `~/.claude/settings.json` (with a backup) and removes an older copy of the hooks from the vault's `.claude` settings. |
-| **Vault files** | Lists your notes to place them as neurons; writes only what you ask for: the optional daily activity note, lessons notes and replay files (in the activity folder). |
-| **Reading `~/.claude/settings.json`** | The setup check reads it to tell you whether the hooks and telemetry are in place. |
+| **Files outside the vault** (Node `fs`) | Used in one small function and for one file only: Claude Code's `settings.json` (in `~/.claude`, or in `CLAUDE_CONFIG_DIR` if you set it). The setup check reads it to tell you whether the hooks and telemetry are in place; *Install* reads it, keeps a backup next to it (`settings.json.agent-brain.bak`, the first one is never overwritten) and writes it. Nothing else outside the vault is read, listed, written or deleted. *Install* also removes an older copy of the hooks from this vault's own `.claude/settings*.json`, through Obsidian's file API. `test/invariants.test.js` fails if this changes. |
+| **Vault listing** (`getMarkdownFiles`) | The brain draws one neuron per note and one synapse per link, so the plugin lists your notes by path and reads the link graph Obsidian already keeps. It also uses the `lobe:` frontmatter Obsidian has already cached. It does not read note contents. Files are read in three places only: the plugin's own daily note (to keep what you wrote under *My notes*), a replay you pick, and the vault's `.claude/settings*.json` that *Install* tidies. It writes only what you ask for: the optional daily note, lessons notes and replay files (in the activity folder). |
 | **Answers to Claude Code** | Empty, except with *Coach mode* on (off by default): then a finding may come back as context. Never a decision. |
-| **Clipboard** | Writes to it only when you press a *Copy* button. Never reads it. |
+| **Clipboard** | Writes to it only when you press a *Copy* button (a path, a call id, the hook JSON, a lessons list, a turn report). Never reads it. |
+| **Code scanning** | Obsidian's directory scan lists the file, vault and clipboard access above because they are in the code. They are the minimum for hooks, a note-based map and Copy buttons, and the checks above are automated. Plugin builds are produced by GitHub Actions and carry build-provenance attestations. |
 | **Account, payment, ads** | None. |
 
 ## Privacy, network and files
@@ -185,8 +188,8 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
 - **Network:** the listener binds to `127.0.0.1` only. The plugin never calls a model and sends nothing anywhere. The
   only outgoing request is the one-time download of the anatomy files from this repository's GitHub release (checked
   against SHA-256 sums built into the plugin).
-- **Files outside your vault:** only when you press *Install* for the hooks, the plugin edits `~/.claude/settings.json`
-  (Claude Code's user settings; a backup is written next to it). Nothing else outside the vault is read or written.
+- **Files outside your vault:** the plugin reads Claude Code's `settings.json` for the setup check and, when you press
+  *Install* for the hooks, edits it (a backup is written next to it). Nothing else outside the vault is read or written.
 - **Stored in the plugin's `data.json`:** settings, the activity trace, short labels of what happened in each region
   (file names and program names, never command lines), learned file connections, today's counters and lessons
   (program names, file names and short sentences, never command lines, paths or secrets).
@@ -197,7 +200,8 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
 - The daily activity note (optional) is written into your vault.
 - Claude Code's telemetry keeps prompts and replies redacted by default; the plugin uses only counts and timings from it.
 - A server's offline queue (events kept while the tunnel is down) drops prompt text, reply text and most of the tool
-  output before writing to disk.
+  output, redacts keys and passwords it recognises, cuts every value to 2,000 characters and is readable by its owner
+  only, before writing to disk.
 
 ## Build from source
 

@@ -19,8 +19,8 @@ window.module={exports:{}}; window.exports=window.module.exports;
 </script>
 <script src="main.js"></script>
 <script>(function(){
-const groupsSpec=[['hubs/',13],['people/',120],['projects/api/',74],['notes/',60],['projects/docs/',17],['plugins/',22],['docs/',9],['kernel/',2],['references/',4],['journal/',30],['tools/',8],['security/',6]];
-const hubNames=['home','index','projects','people','api','docs','security','memory','plan','brief','agents','tools','glossary'];
+const groupsSpec=[['hubs/',12],['people/',48],['projects/alpha/',52],['notes/',64],['projects/beta/',19],['journal/',34],['reference/',11],['tools/',9],['archive/',16]];
+const hubNames=['home','index','topics','people','research','reading','ideas','plan','weekly','archive','tools','glossary'];
 const files=[];for(const [g,c] of groupsSpec)for(let i=0;i<c;i++){const nm=g.includes('hubs')?hubNames[i]:g.split('/').filter(Boolean).pop()+'-'+i;files.push({path:g+nm+'.md',basename:nm});}
 const hubs=files.filter(f=>f.path.includes('hubs'));const rl={};
 let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;

@@ -12,7 +12,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { INSTALL_SH } from './scripts.js';
 import { REPO, ASSET_RELEASE, ASSETS } from './generated.js';
 import { bashCategory, bashParts, psCategory, mcpCategory, shellTargets } from './intent.js';
-import { riskyCommand, findSecrets, maskSecrets, UNTRUSTED_TOOLS, sensitivePath, egressCommand, secretDump, persistence, injectionText, lessonFor, agentToHook, scrubText, scrubReplay, THEMES } from './insight.js';
+import { riskyCommand, riskyScript, findSecrets, maskSecrets, UNTRUSTED_TOOLS, sensitivePath, egressCommand, secretDump, persistence, injectionText, lessonFor, agentToHook, scrubReplay, programOf, claimsOf, costCompare, muteKey, TEST_CMD, TESTS_ONLY, THEMES } from './insight.js';
 import { AAL, AAL_LOBE, GYRI, aalName, bundleName, parseAal, parseInner, parseT1, parseTracts, makeInner, makeTracts, makeSlice } from './anatomy.js';
 
 const obsidian = require('obsidian');
@@ -218,16 +218,16 @@ function responseSize(r) {
   return 0;
 }
 // ---------- reality check: where what the agent believed and what was really there differ ----------
-const TEST_CMD = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|build|lint|typecheck|check|ci)\b|\b(pytest|jest|vitest|mocha|phpunit|rspec|tsc|eslint|ruff|mypy|go\s+(test|build|vet)|cargo\s+(test|build|check)|dotnet\s+(test|build)|mvn|gradle|make)\b/;
-const CLAIM_TESTS = /\b(all\s+)?(the\s+)?(tests?|test suite|specs?)\s+(are\s+|now\s+|all\s+)*(pass|passing|passed|green|succeed|succeeded)\b|\btestler(in hepsi)?\s+(artık\s+)?(geçiyor|geçti|başarılı)|\btüm testler\b/i;
-const CLAIM_BUILD = /\bbuild\s+(now\s+)?(succeeds|succeeded|passes|passed|is green|works)\b|\b(derleme|build)\s+başarılı/i;
-const CLAIM_FIXED = /\b(i('ve| have)\s+)?fixed\b|\bnow works\b|\bit works\b|\bis (now )?working\b|düzelttim|sorun(u)? çözüldü|artık çalışıyor/i;
 const FILEISH = /\b[\w-]+\.(js|mjs|cjs|ts|tsx|jsx|py|go|rs|java|kt|rb|php|cs|c|cc|cpp|h|hpp|swift|json|ya?ml|toml|css|scss|html|vue|svelte|sql|sh)\b/;
-// a command by its program and subcommand only ("npm install", "ssh"): what a lesson keeps, never the full line
-function cmdName(c) {
-  const w = String(c || '').replace(/^\s*(sudo|cd\s+\S+\s*(&&|;))\s*/g, '').trim().split(/\s+/);
-  const prog = (w[0] || '').split(/[\\/]/).pop();
-  return /^[a-z][\w.-]*$/i.test(prog) ? prog + (w[1] && /^[a-z][\w:-]*$/.test(w[1]) ? ' ' + w[1] : '') : '';
+// the one door to Node's fs: Claude Code's user settings file (and its backup next to it). Nothing else outside the vault is touched.
+function claudeSettings() {
+  const fs = require('fs'), path = require('path'), os = require('os');
+  const file = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json');
+  return {
+    file,
+    read() { return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '') || '{}') : null; },
+    write(cfg) { fs.mkdirSync(path.dirname(file), { recursive: true }); if (fs.existsSync(file) && !fs.existsSync(file + '.agent-brain.bak')) fs.copyFileSync(file, file + '.agent-brain.bak'); fs.writeFileSync(file, JSON.stringify(cfg, null, 2)); },
+  };
 }
 function hostOf(u) { try { return new URL(String(u)).host || String(u); } catch (e) { return clip(String(u || 'a web page'), 40); } }
 function outputText(ev) {
@@ -235,7 +235,12 @@ function outputText(ev) {
   if (ev.error) parts.push(String(ev.error));
   const r = ev.tool_response;
   if (typeof r === 'string') parts.push(r);
-  else if (r && typeof r === 'object') for (const k of ['stderr', 'stdout', 'error', 'output', 'result', 'content', 'message']) if (typeof r[k] === 'string') parts.push(r[k]);
+  else if (r && typeof r === 'object') {
+    for (const k of ['stderr', 'stdout', 'error', 'output', 'result', 'content', 'message']) if (typeof r[k] === 'string') parts.push(r[k]);
+    // MCP results ({ content: [{ type: 'text', text }] } or a list) and web search results
+    const walk = (v, d) => { if (d > 4 || parts.length > 200) return; if (typeof v === 'string') parts.push(v); else if (Array.isArray(v)) v.forEach(x => walk(x, d + 1)); else if (v && typeof v === 'object') { if (typeof v.text === 'string') parts.push(v.text); for (const k of ['content', 'results', 'items', 'snippet', 'title', 'body']) if (v[k] != null && typeof v[k] !== 'string') walk(v[k], d + 1); else if (typeof v[k] === 'string' && k !== 'content') parts.push(v[k]); } };
+    walk(Array.isArray(r) ? r : [typeof r.content === 'string' ? null : r.content, r.results], 0);
+  }
   return parts.join('\n').slice(0, 30000);
 }
 function testFailed(text) {
@@ -556,6 +561,8 @@ class BrainView extends ItemView {
     this.captionEl = root.createDiv({ cls: 'cb-caption' });
     this.bannerEl = root.createDiv({ cls: 'cb-banner' });
     this.panelEl = root.createDiv({ cls: 'cb-panel' });
+    this.panelEl.addEventListener('pointerenter', () => { this._panelHover = true; });
+    this.panelEl.addEventListener('pointerleave', () => { this._panelHover = false; if (this.panel && this.panel.kind === 'session') this.renderPanel(); });
 
     // timeline drawer: one lane per session, click to replay
     this.tlEl = root.createDiv({ cls: 'cb-timeline' });
@@ -722,7 +729,7 @@ class BrainView extends ItemView {
     this.initGpuTimer();
     // start where auto quality settled last time on this screen and GPU; otherwise from what kind of GPU this is
     const al = this.plugin.settings.autoLevel, dpr0 = window.devicePixelRatio || 1;
-    if (al && al.dpr === dpr0 && al.gpu === this.gpu.name) this.qLevel = Math.max(0, al.level | 0);
+    if (al && al.dpr === dpr0 && al.gpu === strHash(this.gpu.name).toString(36)) this.qLevel = Math.max(0, al.level | 0);
     else this.qLevel = this.levelFor(this.gpu.tier === 2 ? { scale: 1.5, samples: 4 } : this.gpu.tier === 1 ? { scale: 1, samples: 2 } : { scale: 0.85, samples: 0 });
     renderer.setPixelRatio(this.qualityScale());
     renderer.setClearColor(0x030407, 1);
@@ -920,7 +927,7 @@ class BrainView extends ItemView {
     if (level > (this.qLevel || 0)) this.qDownAt = now;
     this.qLevel = level; this.slowSince = 0; this.fastSince = 0; this.load = 1; this.load60 = 0; this.gpuMs = null; this.gpu60 = undefined;
     this.applyQuality();
-    this.plugin.settings.autoLevel = { dpr: window.devicePixelRatio || 1, gpu: this.gpu ? this.gpu.name : '', level }; this.plugin.saveAll();
+    this.plugin.settings.autoLevel = { dpr: window.devicePixelRatio || 1, gpu: strHash(this.gpu ? this.gpu.name : '').toString(36), level }; this.plugin.saveAll();
   }
   // frame timing: rolling average of the interval between consecutive drawn frames
   trackFrame(now) {
@@ -2289,7 +2296,7 @@ class BrainView extends ItemView {
     return out;
   }
   // one turn at a glance: a time map of the tool calls, then what it did and what it cost
-  renderReport(el, rep, row) {
+  renderReport(el, rep, row, sid) {
     const bar = el.createDiv({ cls: 'cb-tm' });
     for (const g of rep.segs) {
       const x = bar.createDiv({ cls: 'cb-tm-seg' + (g.fail ? ' is-fail' : '') + (g.sub ? ' is-sub' : '') });
@@ -2301,11 +2308,17 @@ class BrainView extends ItemView {
     row('cb-tm-legend').setText(`Tools ${fmtDur(rep.tool)} · thinking ${fmtDur(think)}${rep.wait ? ` · waiting for you ${fmtDur(rep.wait)}` : ''}`);
     const line = (a, b, cls) => { const r = row(cls || ''); r.createSpan({ cls: 'cb-p-x', text: a }); if (b) r.createSpan({ cls: 'cb-p-t', text: b }); return r; };
     const cats = Object.entries(rep.cats).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${n} ${(CAT[c] || CAT.other).tag.toLowerCase()}`).join(', ');
-    line(`${rep.calls} tool call${rep.calls === 1 ? '' : 's'}${cats ? ': ' + cats : ''}`, rep.cost > 0 ? `$${rep.cost.toFixed(2)}` : '', 'is-wrap');
+    const sess = sid && this.plugin.sessions.get(sid), cc = sess ? costCompare(rep.cost, sess.reports, rep) : null;
+    const usual = cc ? (cc.ratio >= 1.5 ? ` · ${cc.ratio.toFixed(1)}× usual` : cc.ratio <= 0.67 ? ` · ${(1 / cc.ratio).toFixed(1)}× less than usual` : ' · about usual') : '';
+    const costRow = line(`${rep.calls} tool call${rep.calls === 1 ? '' : 's'}${cats ? ': ' + cats : ''}`, rep.cost > 0 ? `$${rep.cost.toFixed(2)}${usual}` : '', 'is-wrap');
+    if (cc) costRow.setAttr('title', `Average of the last ${cc.n} turns here that cost something: $${cc.avg.toFixed(2)}`);
     if (rep.files.length) line(`Changed ${rep.files.length} file${rep.files.length === 1 ? '' : 's'}: ${clip(rep.files.join(', '), 120)}`, '');
     if (rep.fails || rep.retries) line(`${rep.fails} failed${rep.retries ? `, ${rep.retries} repeated after failing` : ''}`, '', 'is-warn');
     if (rep.findings) line(`${rep.findings} finding${rep.findings === 1 ? '' : 's'} (see above)`, '', 'is-warn');
     line(rep.sources ? `Based on ${rep.sources} source${rep.sources === 1 ? '' : 's'} (files, searches, pages, commands)` : 'Read, searched and ran nothing', '');
+    const tools = row('cb-p-tools'), cp = tools.createEl('button', { cls: 'cb-p-btn', text: 'Copy report' });
+    cp.setAttr('title', 'Copy this turn\'s report as text');
+    cp.addEventListener('click', () => { navigator.clipboard.writeText(this.plugin.reportText(rep, cc, usual)); this.flash('Report copied'); });
   }
   renderSessionTools(el, sid, row, sec) {
     const p = this.plugin;
@@ -2517,10 +2530,16 @@ class BrainView extends ItemView {
       if (ev) kv('Evidence', ev.text || ev.tool, { click: () => this.goDetail(ev), tip: 'Show that call' });
       const why = rec.group === 'guard' ? KIND_WHY.guard : rec.group === 'shield' ? KIND_WHY.shield : KIND_WHY.doubt;
       if (why) row('cb-d-why').setText(why);
+      const sess = this.plugin.sessions.get(rec.sid), proj = (sess && sess.project) || '';
+      if (sess && !this.plugin.isDemo(sess)) {
+        const tools = row('cb-p-tools'), mb = tools.createEl('button', { cls: 'cb-p-btn', text: 'This is normal here' });
+        mb.setAttr('title', `Stop raising "${F.name}" findings${rec.sig ? ' like this one' : ''} in ${proj || 'this project'}. You can undo it in Agent Brain's settings.`);
+        mb.addEventListener('click', () => { this.plugin.muteFinding(proj, rec); mb.setText('Muted for ' + (proj || 'this project')); mb.disabled = true; });
+      }
       return;
     }
     if (rec.e === 'Stop' && (rec.report || rec.sources)) {
-      if (rec.report) { sec('This turn', fmtDur(rec.report.dur)); this.renderReport(el, rec.report, row); }
+      if (rec.report) { sec('This turn', fmtDur(rec.report.dur)); this.renderReport(el, rec.report, row, rec.sid); }
       const S0 = rec.sources || [];
       sec('Based on', S0.length ? `${S0.length} source${S0.length === 1 ? '' : 's'}` : 'nothing');
       if (!S0.length) row('is-empty').setText('It read, searched and ran nothing in this turn: the answer rests on what it already knew.');
@@ -2756,6 +2775,8 @@ class BrainView extends ItemView {
     const el = this.panelEl, P = this.panel, p = this.plugin, now = Date.now();
     if (!el || !P) return;
     if (/^(setup|lessons|autopsy|compare|project)$/.test(P.kind)) { if (!force && P._drawn) return; P._drawn = true; }
+    // the session panel refreshes as events come in, but not while you are pointing at it (a click would be lost)
+    if (!force && P.kind === 'session' && this._panelHover) return;
     if (P.kind === 'signal') {
       const sel = P.sel || P.rec || (P.h && P.h.sp.src && P.h.sp.src.rec) || null, cs = sel ? this.callRecs(sel) : null;
       const sig = [P.tab, sel ? sel.t + sel.e : '', cs && cs.post ? cs.post.e : '', cs ? cs.perm.length : 0, P.tab === 'tree' ? p.history.length : 0, sel && p.detailOf(sel) ? 1 : 0, (P.stack || []).length].join('|');
@@ -2818,7 +2839,7 @@ class BrainView extends ItemView {
         row('is-empty').setText({ guard: 'Destructive commands and secrets in the open. Agent Brain only watches: nothing was stopped.', shield: 'Untrusted content followed by a step an attacker would want. A hint, not proof: check what it read.', reality: 'Signs that what the agent believed and what was really there differ. They are hints, not proof: check the evidence.' }[g]);
       }
       const rep = s && s.reports && s.reports[s.reports.length - 1];
-      if (rep) { sec('Last turn', `${fmtDur(rep.dur)}, ${fmtAgo(now - rep.t1)} ago`); this.renderReport(el, rep, row); }
+      if (rep) { sec('Last turn', `${fmtDur(rep.dur)}, ${fmtAgo(now - rep.t1)} ago`); this.renderReport(el, rep, row, P.id); }
       this.renderSessionTools(el, P.id, row, sec);
       const M = p.metab.get(P.id);
       if (M && M.calls) {
@@ -3132,6 +3153,8 @@ class BrainView extends ItemView {
 
   stopReplay() {
     if (!this.replay) return;
+    // a shared replay leaves nothing behind in your timeline
+    if (this.replay.drop && this.replay.only) { const sid = this.replay.only, H = this.plugin.history; for (let i = H.length - 1; i >= 0; i--) if (H[i].sid === sid) H.splice(i, 1); }
     this.replay = null;
     this.tags = [];
     this.applyLayout();
@@ -3145,7 +3168,7 @@ class BrainView extends ItemView {
     r.clock += dt * 1000 * r.speed;
     const h = this.plugin.history;
     let n = 0;
-    while (r.idx < h.length && h[r.idx].t <= r.clock && n < 30) { this.playRecord(h[r.idx]); r.idx++; n++; }
+    while (r.idx < h.length && h[r.idx].t <= r.clock && n < 30) { if (!r.only || h[r.idx].sid === r.only) this.playRecord(h[r.idx]); r.idx++; n++; }
     if (n === 30 && r.idx < h.length && h[r.idx].t <= r.clock) r.clock = h[r.idx].t;   // don't skip events when the replay is very dense
     if (r.clock >= (r.until || Date.now()) || r.idx > h.length) this.stopReplay();
     else this.drawTimeline();
@@ -3509,7 +3532,7 @@ class BrainView extends ItemView {
     try { (r.strikes || []).forEach((st, i) => this.strike(st, sc, 1, i * 110, { amp: 0.9 })); } finally { this._src = null; }
     this.pushLog({ hook_event_name: 'Doubt' }, '', s, a, { text: r.text });
     const F = findingOf(r), L0 = this.log && this.log[0];
-    if (L0 && r.group && r.group !== 'reality') { L0.tag = F.tag; L0.color = F.color; this.renderLog && this.renderLog(); }
+    if (L0 && L0.text === r.text && r.group && r.group !== 'reality') { L0.tag = F.tag; L0.color = F.color; this.renderLog && this.renderLog(); }
     this.flash(F.name + ': ' + clip(r.text, 90));
   }
   onAlarm(s) {
@@ -4109,7 +4132,7 @@ class BrainView extends ItemView {
 class AgentBrainPlugin extends Plugin {
   async onload() {
     const data = (await this.loadData()) || {};
-    const { memory, learned, daily, engram, regions, lessons, ...saved } = data;
+    const { memory, learned, daily, engram, regions, lessonsData, ...saved } = data;
     this.settings = Object.assign({}, DEFAULTS, saved);
     // older versions only had fps (60 or 30): Battery stays Battery, everyone else gets the adaptive rate
     if (!saved || saved.frameRate == null) this.settings.frameRate = saved && Number(saved.fps) === 30 ? '30' : 'auto';
@@ -4131,7 +4154,10 @@ class AgentBrainPlugin extends Plugin {
     this.vitals = new Map();
     this.metab = new Map();               // per session: model calls, tokens, cost, context (from Claude Code telemetry)
     this.regionMem = regions && typeof regions === 'object' ? regions : {};
-    this.lessons = lessons && typeof lessons === 'object' && !Array.isArray(lessons) ? lessons : {};   // per project: what past turns taught   // per gyrus / nucleus: what happened there
+    // per project: what past turns taught (0.11.0 stored it under "lessons", which is the on/off setting's name)
+    const L0 = lessonsData || (saved.lessons && typeof saved.lessons === 'object' ? saved.lessons : null);
+    if (saved.lessons && typeof saved.lessons === 'object') this.settings.lessons = true;
+    this.lessons = L0 && typeof L0 === 'object' && !Array.isArray(L0) ? L0 : {};   // per gyrus / nucleus: what happened there
     this.history = [];
     this.sources = new Map();
     this.sessions = new Map();
@@ -4183,7 +4209,7 @@ class AgentBrainPlugin extends Plugin {
     for (const k in E.n) eng.n[k] = E.n[k].map(r);
     for (const k in E.f) eng.f[k] = r(E.f[k]);
     this.pruneRegionMem();
-    await this.saveData(Object.assign({}, this.settings, { memory: this.memory, learned: this.learned, daily: this.daily, engram: eng, regions: this.regionMem, lessons: this.lessons || {} }));
+    await this.saveData(Object.assign({}, this.settings, { memory: this.memory, learned: this.learned, daily: this.daily, engram: eng, regions: this.regionMem, lessonsData: this.lessons || {} }));
   }
 
   /* ---------- shared neural geometry: gyrus anchors and fibre endpoints, the same for every view ---------- */
@@ -4544,7 +4570,7 @@ class AgentBrainPlugin extends Plugin {
         agents: new Map(), pending: [], workflow: null, tasks: new Map(), taskQueue: [], todo: null, planAt: 0 };
       this.sessions.set(sid, s);
     }
-    if (!opts.replay) this.lastRealEvent = Date.now();
+    if (!opts.replay && !this.isDemo({ id: sid })) this.lastRealEvent = Date.now();
     if (e === 'MessageDisplay') { s.src = src; this.noteSource(src, 'event', now); this.onSpeech(s, ev, now, opts); return; }
     s.at = Math.max(s.at, now); s.events++; s.src = src;
     if (!opts.replay) this.eventTimes.push(now);
@@ -5169,7 +5195,7 @@ class AgentBrainPlugin extends Plugin {
     if (e === 'PostToolUseFailure' && (tool === 'Bash' || tool === 'PowerShell')) {
       const cmd = clip(String(ti.command || '').split('\n')[0], 70);
       const n = T.fails[cmd] = (T.fails[cmd] || 0) + 1;
-      if (n === 2) this.addLesson(s, 'repeatfail', cmdName(cmd));
+      if (n === 2) this.addLesson(s, 'repeatfail', programOf(cmd));
     }
   }
   // guard: destructive commands and secrets in the open; shield: untrusted content followed by what an attacker wants
@@ -5188,19 +5214,22 @@ class AgentBrainPlugin extends Plugin {
         else if (/^(Read|Grep|Glob|NotebookRead)$/.test(tool) && sensitivePath(P || ti.pattern)) what = 'reads credentials (' + baseName(P || String(ti.pattern)) + ')';
         else if (/^(Write|Edit|MultiEdit)$/.test(tool) && (sensitivePath(P) || persistence('> ' + P))) what = 'writes to ' + baseName(P);
         else if (tool === 'WebFetch' && /[?&][^=]+=[^&]{40,}/.test(String(ti.url || ''))) what = 'sends a long value to ' + hostOf(ti.url);
-        if (what) { flag('shield', 'chain', `Right after reading untrusted content (${T.taint.what}), it ${what}${shell ? ': ' + line : ''}.`, { detail: T.taint.what }); }
+        if (what) { flag('shield', 'chain', `Right after reading untrusted content (${T.taint.what}), it ${what}${shell ? ': ' + line : ''}.`, { detail: T.taint.what, sig: what.replace(/[:(].*$/, '').trim() }); }
       }
       if (!guard) return;
       if (shell) {
         const why = riskyCommand(cmd);
-        if (why) flag('guard', 'risky', `Risky command: ${why}. ${line}`);
+        if (why) flag('guard', 'risky', `Risky command: ${why}. ${line}`, { sig: why });
         const sec = findSecrets(cmd);
-        if (sec.length) flag('guard', 'secret', `A secret (${sec.join(', ')}) is written out on a command line: ${line}`);
+        if (sec.length) flag('guard', 'secret', `A secret (${sec.join(', ')}) is written out on a command line: ${line}`, { sig: sec.join(',') });
       } else if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(tool)) {
         const P = String(ti.file_path || ti.notebook_path || '');
         const text = String(ti.content || ti.new_string || ti.new_source || '') + (Array.isArray(ti.edits) ? ti.edits.map(x => x && x.new_string || '').join('\n') : '');
         const sec = findSecrets(text);
-        if (sec.length) flag('guard', 'secret', `Wrote a secret (${sec.join(', ')}) into ${baseName(P) || 'a file'}.`, { important: !/(^|[\\/])\.env(\.[\w-]+)?$/.test(P) });
+        if (sec.length) flag('guard', 'secret', `Wrote a secret (${sec.join(', ')}) into ${baseName(P) || 'a file'}.`, { important: !/(^|[\\/])\.env(\.[\w-]+)?$/.test(P), sig: sec.join(',') });
+        const script = /\.(sh|bash|zsh|ps1|psm1|bat|cmd|mk)$|(^|[\\/])(Makefile|Dockerfile|Jenkinsfile)$/i.test(P) || /^#!\s*\/(usr\/)?(bin|local\/bin)\/(env\s+)?(ba|z)?sh\b/.test(text);
+        const bad = script ? riskyScript(text) : '';
+        if (bad) flag('guard', 'risky', `Wrote a script that does something risky: ${bad} (${baseName(P) || 'a script'}).`, { sig: bad });
       }
       return;
     }
@@ -5211,7 +5240,7 @@ class AgentBrainPlugin extends Plugin {
         if (!url && rec.id) for (let i = this.history.length - 1, j = 0; i >= 0 && j < 400; i--, j++) if (this.history[i].id === rec.id && this.history[i].e === 'PreToolUse') { url = this.history[i].key; break; }
         const what = tool === 'WebFetch' ? hostOf(url) : tool === 'WebSearch' ? 'web search' : fetches ? 'a download' : toolLabel(tool);
         T.taint = { what, at: now, ref: rec.id || '' };
-        if (injectionText(outputText(ev))) flag('shield', 'injection', `What it just read from ${what} contains instructions aimed at the agent. Watch what it does next.`, { detail: what });
+        if (injectionText(outputText(ev))) flag('shield', 'injection', `What it just read from ${what} contains instructions aimed at the agent. Watch what it does next.`, { detail: what, sig: what });
       }
     }
   }
@@ -5245,6 +5274,7 @@ class AgentBrainPlugin extends Plugin {
     };
     rec.report = rep; rec.sources = T.sources.slice();
     const L = s.reports || (s.reports = []); L.push(rep); if (L.length > 12) L.shift();
+    s.turnCheck = null;   // the next turn starts clean, even when no new prompt comes first
   }
   checkFacts(rec, ev, s, a, now, T) {
     const e = rec.e, tool = ev.tool_name || '', ti = ev.tool_input || {};
@@ -5255,13 +5285,15 @@ class AgentBrainPlugin extends Plugin {
     }
     if (e === 'PreToolUse' && /^(Edit|MultiEdit|Write|NotebookEdit)$/.test(tool) && T.misses.length) {
       const text = String(ti.new_string || ti.content || ti.new_source || '') + (Array.isArray(ti.edits) ? ti.edits.map(x => x && x.new_string || '').join('\n') : '');
-      const hit = T.misses.find(m => new RegExp('\\b' + m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(text));
+      const esc = (m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const defines = (m) => new RegExp('\\b(function|const|let|var|class|def|fn|func|type|interface|enum|struct)\\s+' + esc(m) + '\\b|\\b' + esc(m) + '\\s*(=|:)\\s*(async\\s*)?(function|\\(|\\w+\\s*=>)').test(text);
+      const hit = T.misses.find(m => new RegExp('\\b' + esc(m) + '\\b').test(text) && !defines(m));
       if (hit) flag('unfound', `Wrote code that uses \`${hit}\`, which its own search just found nowhere (${short(ti.file_path || '')}).`);
     }
     if (e !== 'PostToolUse' && e !== 'PostToolUseFailure') { if (e === 'Stop' && !a) this.checkClaims(s, ev, now); return; }
     const out = outputText(ev), failed = e === 'PostToolUseFailure';
     const t = rec.id ? T.tests.find(x => x.id === rec.id) : null;
-    if (t) { t.ok = !failed && !testFailed(out); if (t.ok && !a) this.addLesson(s, 'testcmd', (String(ti.command || '').match(TEST_CMD) || [''])[0]); }
+    if (t) { t.ok = !failed && !testFailed(out); if (t.ok && !a) { const tm = String(ti.command || '').match(TESTS_ONLY); if (tm) this.addLesson(s, 'testcmd', tm[0]); } }
     if (tool === 'Grep' && !failed) {
       const r = ev.tool_response, pat = String(ti.pattern || '');
       const none = (r && typeof r === 'object' && (r.numFiles === 0 || r.numMatches === 0 || (Array.isArray(r.filenames) && !r.filenames.length && !r.content))) || (typeof r === 'string' && /^\s*(No (files|matches) found|Found 0 )/i.test(r));
@@ -5272,7 +5304,7 @@ class AgentBrainPlugin extends Plugin {
     else if (/^(Edit|MultiEdit)$/.test(tool) && /string to replace (was )?not found|old_string.*not found|not found in (the )?file|no (exact )?match/i.test(out)) flag('mismatch', `Tried to change text that is not in ${short(ti.file_path || 'the file')}: its picture of that file was wrong.`, short(ti.file_path || ''));
     else if (/^(Edit|MultiEdit|Write)$/.test(tool) && /has not been read yet|read it first|must read/i.test(out)) flag('unread', `Tried to change ${short(ti.file_path || 'a file')} without reading it first.`);
     else if (tool === 'Bash' || tool === 'PowerShell') {
-      if ((m = out.match(/(?:^|\n)(?:[^\n:]*:\s*)?([\w.+-]+): (?:command )?not found/) || out.match(/'([^']+)' is not recognized as (?:an internal or external command|the name of a cmdlet)/))) flag('nocommand', `Ran a command that does not exist here: ${m[1]}.`, m[1]);
+      if ((m = out.match(/^[^\n]*?([\w.+-]+): (?:command )?not found\s*$/m) || out.match(/command not found: ([\w.+-]+)/) || out.match(/'([^']+)' is not recognized as (?:an internal or external command|(?:the|a) name of a cmdlet)/) || out.match(/The term '([^']+)' is not recognized/))) flag('nocommand', `Ran a command that does not exist here: ${m[1]}.`, m[1]);
       else if ((m = out.match(/Cannot find module '([^']+)'/) || out.match(/ModuleNotFoundError: No module named '([^']+)'/) || out.match(/cannot find package "([^"]+)"/))) flag('nomodule', `Used a module that is not installed or does not exist: ${m[1]}.`, m[1]);
       else if ((m = out.match(/npm (?:ERR!|error) 404\s+'(@?[^'@\s]+)(?:@[^']*)?' is not in/) || out.match(/404 Not Found - GET https?:\/\/registry\.npmjs\.org\/(@?[\w.-]+(?:\/[\w.-]+)?)/) || out.match(/No matching distribution found for ([\w.\-\[\]=<>]+)/) || out.match(/Could not find a version that satisfies the requirement ([\w.\-\[\]=<>]+)/))) flag('nopackage', `Tried to install a package that does not exist: ${m[1]}.`, m[1]);
       else if ((m = out.match(/Missing script: "?([\w:.-]+)"?/))) flag('noscript', `Ran an npm script the project does not have: ${m[1]}.`, m[1]);
@@ -5285,21 +5317,47 @@ class AgentBrainPlugin extends Plugin {
     const said = String(ev.last_assistant_message || s.said || '').slice(-4000);
     if (!said) return;
     const tests = T.tests.filter(x => !x.aid && x.ok !== null), last = tests[tests.length - 1];
-    const claimT = CLAIM_TESTS.test(said), claimB = CLAIM_BUILD.test(said), claimF = CLAIM_FIXED.test(said);
+    const claim = claimsOf(said), claimT = claim.tests, claimB = claim.build, claimF = claim.fixed;
     const ref = last ? last.id : '';
     if (this.settings.evidence !== false && said.length > 500 && !T.sources.length && FILEISH.test(said)) this.flagReality(s, null, { kind: 'ungrounded', text: 'Talked about specific files without reading, searching or running anything in this turn.', ref: '' }, now);
     if ((claimT || claimB) && last && last.ok === false) this.flagReality(s, null, { kind: 'contradicted', text: `Said ${claimT ? 'the tests pass' : 'the build works'}, but the last run (${last.cmd}) failed.`, ref, important: true }, now);
     else if (claimT && !T.tests.length) this.flagReality(s, null, { kind: 'unproven', text: 'Said the tests pass, but ran no tests in this turn.', ref: '', important: true }, now);
     else if (claimF && last && last.ok === false) this.flagReality(s, null, { kind: 'contradicted', text: `Said it is fixed, but the last check (${last.cmd}) failed.`, ref, important: true }, now);
   }
+  // a turn report as plain text (what you press Copy for)
+  reportText(rep, cc, usual) {
+    const cats = Object.entries(rep.cats || {}).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${n} ${(CAT[c] || CAT.other).tag.toLowerCase()}`).join(', ');
+    const think = Math.max(0, rep.dur - rep.tool - rep.wait), L = [];
+    L.push(`Turn report: ${fmtDur(rep.dur)} (tools ${fmtDur(rep.tool)}, thinking ${fmtDur(think)}${rep.wait ? `, waiting for you ${fmtDur(rep.wait)}` : ''})`);
+    L.push(`${rep.calls} tool call${rep.calls === 1 ? '' : 's'}${cats ? ': ' + cats : ''}${rep.cost > 0 ? ` · $${rep.cost.toFixed(2)}${usual || ''}` : ''}`);
+    if (cc) L.push(`Usual cost: $${cc.avg.toFixed(2)} (average of the last ${cc.n} turns)`);
+    if (rep.files && rep.files.length) L.push(`Changed ${rep.files.length} file${rep.files.length === 1 ? '' : 's'}: ${rep.files.join(', ')}`);
+    if (rep.fails || rep.retries) L.push(`${rep.fails} failed${rep.retries ? `, ${rep.retries} repeated after failing` : ''}`);
+    if (rep.findings) L.push(`${rep.findings} finding${rep.findings === 1 ? '' : 's'}`);
+    L.push(rep.sources ? `Based on ${rep.sources} source${rep.sources === 1 ? '' : 's'}` : 'Read, searched and ran nothing');
+    return maskSecrets(L.join('\n'));
+  }
+  // "this is normal here": findings you marked as expected in a project are not raised again
+  isMuted(s, f) { const m = this.settings.muted && this.settings.muted[(s && s.project) || '']; return !!(m && m.includes(muteKey(f))); }
+  muteFinding(project, rec) {
+    const key = muteKey(rec), m = this.settings.muted = Object.assign({}, this.settings.muted), L = m[project || ''] = (m[project || ''] || []).slice();
+    if (!L.includes(key)) L.push(key);
+    this.saveAll();
+  }
+  unmuteFinding(project, key) {
+    const m = this.settings.muted = Object.assign({}, this.settings.muted), L = (m[project] || []).filter(k => k !== key);
+    if (L.length) m[project] = L; else delete m[project];
+    this.saveAll();
+  }
   flagReality(s, a, f, now) {
     f.t = now; f.group = f.group || 'reality';
+    if (this.isMuted(s, f)) return;
     const L = s.reality || (s.reality = []);
     if (L.some(x => x.text === f.text && now - x.t < 60000)) return;
     L.push(f); if (L.length > 40) L.splice(0, L.length - 40);
     s.doubts = (s.doubts || 0) + (f.important ? 2 : 1);
     const r = this.record({ hook_event_name: 'Doubt', session_id: s.id }, s, a, now);
-    r.text = f.text; r.ref = f.ref; r.kind = f.kind; r.group = f.group;
+    r.text = f.text; r.ref = f.ref; r.kind = f.kind; r.group = f.group; r.sig = f.sig || '';
     r.strikes = this.strikesFor(r);
     if (!this.isDemo(s)) { this.deposit(r.strikes, now, 0.8); this.remember(r.strikes, s, a, now, 'Doubt'); }
     if (f.detail && f.group === 'reality') this.addLesson(s, f.kind, f.detail);
@@ -5502,27 +5560,27 @@ class AgentBrainPlugin extends Plugin {
   async exportReplay(sid) {
     const m = this.sessionMetrics(sid);
     if (!m) { new Notice('Agent Brain: nothing recorded for that session.'); return null; }
-    const data = scrubReplay(m.recs.filter(r => r.e !== 'PostToolUse' || r.id), String(m.label || '').split(' ')[0]);
+    const data = scrubReplay(m.recs.filter(r => r.e !== 'PostToolUse' || r.id));
     const d = new Date(m.t0), pad = (n) => String(n).padStart(2, '0');
     const folder = this.replayFolder();
-    const path = `${folder}/${data.project.replace(/[^\w.-]+/g, '-')}-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+    const path = `${folder}/replay-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
     try {
       if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder).catch(() => {});
       const json = JSON.stringify(data);
       const f = this.app.vault.getAbstractFileByPath(path);
       if (f) await this.app.vault.modify(f, json); else await this.app.vault.create(path, json);
-      new Notice(`Agent Brain: replay saved to ${path}. Names, paths, prompts and secrets were taken out.`);
+      new Notice(`Agent Brain: replay saved to ${path}. It keeps timing, tools and program names only: no project, file or folder names, prompts, replies, queries, addresses or arguments.`);
       return path;
     } catch (e) { console.error('[agent-brain] export', e); new Notice('Agent Brain: could not save the replay.'); return null; }
   }
   // a shared replay plays on your brain as a past session; it never touches your memory or learning
   loadReplay(data) {
     if (!data || data.format !== 'agent-brain-replay' || !Array.isArray(data.events) || !data.events.length) throw new Error('not an Agent Brain replay');
-    const evs = data.events.slice(0, 20000), dur = Math.max(0, Number(evs[evs.length - 1].dt) || 0);
+    const evs = data.events.slice(0, 20000), dtOf = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(n, 6048e5)) : 0; }, dur = evs.reduce((m, x) => Math.max(m, dtOf(x && x.dt)), 0);   // a replay is at most a week long; odd numbers count as 0
     const t0 = Date.now() - dur - 2000, sid = 'replay-' + Math.random().toString(36).slice(2, 8);
     const label = 'replay · ' + clip(String(data.project || 'session').replace(/[^\w .-]/g, ''), 30), color = '#9aa4b2', str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
     const recs = evs.map(x => {
-      const cat = str(x.cat, 20), r = { t: t0 + Math.max(0, Number(x.dt) || 0), sid, e: str(x.e, 40), tool: str(x.tool, 60), cat, lobe: cat ? (CAT[cat] || CAT.other).lobe : '',
+      const cat = str(x.cat, 20), r = { t: t0 + dtOf(x.dt), sid, e: str(x.e, 40), tool: str(x.tool, 60), cat, lobe: cat ? (CAT[cat] || CAT.other).lobe : '',
         aid: str(x.aid, 20), agent: str(x.agent, 40), wf: false, text: str(x.text, 200), file: str(x.file, 120), cwd: '', ntype: str(x.ntype, 40),
         color, label, idx: 99, src: 'replay' };
       if (x.id) r.id = sid + str(x.id, 20);
@@ -5534,7 +5592,8 @@ class AgentBrainPlugin extends Plugin {
     return { sid, t0, dur, n: recs.length };
   }
   async importReplay() {
-    const files = this.app.vault.getFiles().filter(f => f.extension === 'json' && /(^|\/)Replays\//.test(f.path));
+    const files = [], walk = (fo) => { for (const c of (fo && fo.children) || []) { if (c.children) walk(c); else if (c.extension === 'json') files.push(c); } };
+    walk(this.app.vault.getAbstractFileByPath(this.replayFolder()));   // only the replay folder is read, never the whole vault
     const FSM = obsidian.FuzzySuggestModal;
     if (!files.length || !FSM) { new Notice(`Agent Brain: put a replay (.json) into ${this.replayFolder()}/ first.`); return; }
     const plugin = this;
@@ -5545,7 +5604,7 @@ class AgentBrainPlugin extends Plugin {
         try {
           const r = plugin.loadReplay(JSON.parse(await plugin.app.vault.read(f)));
           const leaf = await plugin.activateView(), v = leaf && leaf.view;
-          if (v && v.startReplay) v.startReplay(r.t0, Math.max(1, r.dur / 45000), r.t0 + r.dur + 1);
+          if (v && v.startReplay) { v.startReplay(r.t0, Math.max(1, r.dur / 45000), r.t0 + r.dur + 1); if (v.replay) { v.replay.only = r.sid; v.replay.drop = true; } }
           new Notice(`Agent Brain: replaying ${r.n} events.`);
         } catch (e) { new Notice('Agent Brain: that file is not a replay it can read (' + e.message + ').'); }
       }
@@ -5574,19 +5633,19 @@ class AgentBrainPlugin extends Plugin {
   setupStatus() {
     const port = Number(this.settings.port) || DEFAULTS.port, out = { port, listening: !!this.serverOk, lastEvent: this.lastRealEvent || 0, hooks: null, hookEvents: 0, hookTotal: Object.keys(this.hooksConfig()).length, telemetry: '', file: '', error: '' };
     try {
-      const fs = require('fs'), path = require('path'), os = require('os');
-      out.file = path.join(os.homedir(), '.claude', 'settings.json');
-      if (!fs.existsSync(out.file)) out.hooks = false;
+      const st = claudeSettings(), cfg = st.read();
+      out.file = st.file;
+      if (!cfg) out.hooks = false;
       else {
-        const cfg = JSON.parse(fs.readFileSync(out.file, 'utf8') || '{}'), H = cfg.hooks || {};
+        const H = cfg.hooks || {};
         for (const e of Object.keys(H)) if (Array.isArray(H[e]) && H[e].some(g => g && Array.isArray(g.hooks) && g.hooks.some(x => String(x.command || '').includes(`:${port}/event`) || String(x.url || '').includes(`:${port}/event`)))) out.hookEvents++;
         out.hooks = out.hookEvents > 0;
         const ep = String((cfg.env || {}).OTEL_EXPORTER_OTLP_ENDPOINT || (cfg.env || {}).OTEL_EXPORTER_OTLP_LOGS_ENDPOINT || '');
         out.telemetry = ep.includes(`:${port}`) ? 'on' : ep ? 'elsewhere' : 'off';
-        out.coachHooks = /PostToolUse/.test(JSON.stringify(H.PostToolUse || '')) && !JSON.stringify(H.PostToolUse || '').includes('-o /dev/null');
+        out.coachHooks = (H.PostToolUse || []).some(g => g && Array.isArray(g.hooks) && g.hooks.some(x => String(x.command || '').includes(`:${port}/event`) && !String(x.command).includes('-o /dev/null')));
       }
     } catch (e) { out.error = e.message; }
-    out.servers = [...this.sources.values()].filter(x => x.name !== 'local').map(x => ({ name: x.name, state: this.sourceState ? this.sourceState(x) : '' }));
+    out.servers = [...this.sources.values()].filter(x => x.name !== 'local' && x.lastBeat).map(x => ({ name: x.name, state: this.sourceState ? this.sourceState(x) : '' }));
     return out;
   }
   async openPanelInView(p) {
@@ -5700,37 +5759,35 @@ class AgentBrainPlugin extends Plugin {
 
   // writes the hooks into ~/.claude/settings.json on this computer (keeps your other hooks, makes a backup first)
   async installLocalHooks() {
-    let fs, path, os;
-    try { fs = require('fs'); path = require('path'); os = require('os'); } catch (e) { new Notice('Agent Brain: no file access here.'); return; }
-    const port = Number(this.settings.port) || DEFAULTS.port;
+    let st;
+    try { st = claudeSettings(); } catch (e) { new Notice('Agent Brain: no file access here.'); return; }
+    const port = Number(this.settings.port) || DEFAULTS.port, file = st.file;
     const mine = (g) => (g && Array.isArray(g.hooks) ? g.hooks : []).some(x => /27182\/event|brain-hook\.sh/.test(String(x.command || '') + String(x.url || '')) || String(x.command || '').includes(`:${port}/event`) || String(x.url || '').includes(`:${port}/event`));
     const strip = (hooks) => { let n = 0; for (const e of Object.keys(hooks || {})) { if (!Array.isArray(hooks[e])) continue; const keep = hooks[e].filter(g => !mine(g)); n += hooks[e].length - keep.length; if (keep.length) hooks[e] = keep; else delete hooks[e]; } return n; };
-    const dir = path.join(os.homedir(), '.claude'), file = path.join(dir, 'settings.json');
     let cfg = {}, telemetry = 'off';
-    try { if (fs.existsSync(file)) cfg = JSON.parse(fs.readFileSync(file, 'utf8') || '{}'); }
+    try { cfg = st.read() || {}; }
     catch (e) { new Notice(`Agent Brain: could not read ${file} (${e.message}). Nothing was changed.`, 10000); return; }
     try {
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      if (fs.existsSync(file)) fs.copyFileSync(file, file + '.agent-brain.bak');
       cfg.hooks = cfg.hooks && typeof cfg.hooks === 'object' ? cfg.hooks : {};
       strip(cfg.hooks);
       const ours = this.hooksConfig();
       for (const e of Object.keys(ours)) cfg.hooks[e] = (cfg.hooks[e] || []).concat(ours[e]);
       telemetry = this.settings.telemetry ? mergeTelemetryEnv(cfg, port) : 'off';
-      fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+      st.write(cfg);
     } catch (e) { new Notice(`Agent Brain: could not write ${file} (${e.message}).`, 10000); return; }
-    // an older copy in this vault's project settings would make every event arrive twice: take ours out there
+    // an older copy in this vault's project settings would make every event arrive twice: take ours out there (through Obsidian's own file API)
     let moved = 0;
-    const base = this.app.vault.adapter && this.app.vault.adapter.basePath;
-    for (const f of base ? [path.join(base, '.claude', 'settings.local.json'), path.join(base, '.claude', 'settings.json')] : []) {
+    const ad = this.app.vault.adapter, norm = (x) => String(x || '').replace(/\\/g, '/').toLowerCase();
+    for (const f of ['.claude/settings.local.json', '.claude/settings.json']) {
       try {
-        if (!fs.existsSync(f)) continue;
-        const c = JSON.parse(fs.readFileSync(f, 'utf8') || '{}');
+        if (ad.basePath && norm(ad.basePath + '/' + f) === norm(file)) continue;   // the file we just wrote is not an "older copy"
+        if (!(await ad.exists(f))) continue;
+        const raw = await ad.read(f), c = JSON.parse(raw.replace(/^\uFEFF/, '') || '{}');
         const n = c.hooks ? strip(c.hooks) : 0;
         if (!n) continue;
-        fs.copyFileSync(f, f + '.agent-brain.bak');
+        if (!(await ad.exists(f + '.agent-brain.bak'))) await ad.write(f + '.agent-brain.bak', raw);
         if (c.hooks && !Object.keys(c.hooks).length) delete c.hooks;
-        fs.writeFileSync(f, JSON.stringify(c, null, 2)); moved += n;
+        await ad.write(f, JSON.stringify(c, null, 2)); moved += n;
       } catch (e) { /* leave a file we can't parse alone */ }
     }
     const tmsg = telemetry === 'set' ? ' Telemetry (model calls, tokens, cost) now goes to the brain as well.' : telemetry === 'other' ? ' Telemetry already goes elsewhere, so it was left alone.' : '';
@@ -5747,7 +5804,9 @@ class AgentBrainPlugin extends Plugin {
       leaf = this.app.workspace.getLeaf('tab');
       await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
+    // a tab restored at startup is only a placeholder until it is shown (Obsidian 1.7.2+)
+    if (leaf.loadIfDeferred) await leaf.loadIfDeferred();
     return leaf;
   }
 
@@ -5974,6 +6033,11 @@ class BrainSettingTab extends PluginSettingTab {
       .addToggle(t => t.setValue(this.plugin.settings.coach === true).onChange(async (v) => { this.plugin.settings.coach = v; await save(); new Notice(`Agent Brain: coach mode ${v ? 'on' : 'off'}. Install the hooks again (Settings → Claude Code hooks → Install) for it to take effect.`, 8000); }));
     new Setting(containerEl).setName('Desktop notifications').setDesc('When Obsidian is in the background, also show a system notification.')
       .addToggle(t => t.setValue(!!this.plugin.settings.desktopNotify).onChange(async (v) => { this.plugin.settings.desktopNotify = v; await save(); }));
+    const muted = this.plugin.settings.muted || {}, mutedRows = Object.entries(muted).flatMap(([proj, keys]) => keys.map(k => [proj, k]));
+    if (mutedRows.length) {
+      new Setting(containerEl).setName('Findings marked as normal').setDesc('Each of these is no longer raised in its project. Press Raise again to undo.').setHeading();
+      for (const [proj, key] of mutedRows) new Setting(containerEl).setName(key.replace(/\//g, ' · ')).setDesc(proj || 'any project').addButton(b => b.setButtonText('Raise again').onClick(async () => { this.plugin.unmuteFinding(proj, key); this.display(); }));
+    }
     new Setting(containerEl).setName('Inspector').setHeading();
     new Setting(containerEl).setName('Full call details').setDesc('Freeze the brain (Space) and click a travelling signal, or click an event in a session: you see everything Claude Code sent about that call. Every parameter of the command, which agent ran it and which call started that agent, what Claude said just before, the plan step, your prompt, where it went, its output, and the raw hook events. Kept in memory only for recent calls, never written to disk, gone when Obsidian closes.')
       .addToggle(t => t.setValue(this.plugin.settings.callDetails !== false).onChange(async (v) => { this.plugin.settings.callDetails = v; if (!v) this.plugin.clearDetails(); await save(); }));

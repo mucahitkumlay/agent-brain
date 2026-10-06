@@ -55,6 +55,16 @@ ok(R().length === k, 'a claim the last run backs up raises nothing');
 E({ hook_event_name: 'UserPromptSubmit', prompt: 'and?', prompt_id: 'p3' });
 E({ hook_event_name: 'Stop', prompt_id: 'p3', last_assistant_message: 'The tests pass.' });
 ok(last().kind === 'unproven', 'a claim with no run behind it: ' + last().text);
+// a message that says the tests FAIL is not a claim that they pass (this used to be accused as "ran no tests")
+E({ hook_event_name: 'UserPromptSubmit', prompt: 'status?', prompt_id: 'p3b' });
+const k2 = R().length;
+E({ hook_event_name: 'Stop', prompt_id: 'p3b', last_assistant_message: 'Tüm testler başarısız oldu, düzeltmem gerekiyor.' });
+E({ hook_event_name: 'Stop', prompt_id: 'p3b', last_assistant_message: 'The tests are failing. I could not get the tests to pass.' });
+ok(R().length === k2, 'a failure report raises nothing');
+E({ hook_event_name: 'UserPromptSubmit', prompt: 'tr', prompt_id: 'p3c' });
+call('Bash', { command: 'node test/run.mjs' }, { hook_event_name: 'PostToolUse', tool_response: { stdout: '3 failed, 40 passed', stderr: '' } });
+E({ hook_event_name: 'Stop', prompt_id: 'p3c', last_assistant_message: 'Düzelttim. Testler artık geçiyor.' });
+ok(last().kind === 'contradicted' && /node test\/run\.mjs/.test(last().text), 'a Turkish claim against a custom test command: ' + last().text);
 p.settings.realityCheck = false;
 E({ hook_event_name: 'UserPromptSubmit', prompt: 'x', prompt_id: 'p4' });
 call('Read', { file_path: '/w/nope.ts' }, { hook_event_name: 'PostToolUseFailure', error: 'File does not exist.' });

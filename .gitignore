@@ -6,3 +6,12 @@ src/generated.js
 .DS_Store
 Thumbs.db
 __pycache__/
+data.json
+.env
+.env.*
+*.pem
+*.key
+.claude/
+*.agent-brain.bak
+*.ndjson
+.obsidian/

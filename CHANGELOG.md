@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.11.1
+- Fix: "Tests pass" is no longer claimed from a message that says the tests fail ("Tüm testler başarısız oldu" was
+  read as a claim and accused as "ran no tests"). Claims now ignore failure reports, conditions and instructions
+  ("make sure the tests pass"), understand Turkish, and catch more English forms ("everything passes", "all green",
+  "0 failures", "42/42 passed").
+- More commands count as running tests: `node test/run.mjs`, `node --test`, `npm t`, `python -m unittest`,
+  `deno test`, `npx playwright test`, `./gradlew test`, `php artisan test`, `swift test`, `flutter test`,
+  `Invoke-Pester`, `pwsh ./test.ps1`, `ctest`, `rake test` and more.
+- Guard: far more risky commands, including Windows and PowerShell (`rmdir /s /q`, `del /s`, `Remove-Item -Recurse`,
+  `irm | iex`, encoded commands), split flags (`rm -r -f`), `find -delete`, script one-liners, `git push +main` and
+  `:main`, `git branch -D`, `docker compose down -v`, cloud deletes (aws, gcloud, az), `FLUSHALL`, `dropDatabase`,
+  `npm unpublish`, `UPDATE` without `WHERE`, and risky lines inside a script the agent writes. Routine clean-ups of
+  build folders and caches stay quiet.
+- Secrets: passwords after `-p`, `--password` or `-u user:pass`, passwords in a URL, `DB_PASSWORD=`,
+  `AWS_SECRET_ACCESS_KEY=`, `client_secret:`, npm, Hugging Face, GitLab, PyPI, Docker, SendGrid, Slack-webhook and
+  storage-account keys, encrypted private keys. Masking now handles all of them, never changes text without a secret
+  and is safe to apply twice.
+- Shield: more sources count as untrusted (pull requests, tickets, pages, threads), more ways to send data out
+  (Python and Node one-liners, `gh gist create`, `git remote add`, `aws s3 cp`, DNS), more ways to read secrets
+  (`echo $TOKEN`, `Get-ChildItem Env:`, `kubectl get secrets`), more startup places (PowerShell profile, services,
+  registry Run keys, git hooks), and injected text in more wordings and in Turkish.
+- Shared replays no longer keep a program, subcommand, agent or tool name you chose yourself: only well-known programs
+  and verbs, and fixed lists for the rest.
+- New: mark a finding *This is normal here* to stop it for one project (undo in the settings); copy a turn report as
+  text; a turn's cost is compared with the project's recent turns.
+- Privacy and hardening: the server queue redacts secrets, cuts values and is readable by its owner only; the GPU name
+  is stored as a hash; the demo page uses neutral names; CI checkouts no longer keep the git token; the vault's own
+  `.claude` clean-up goes through Obsidian's file API; Node's `fs` is used in one function for one file, and the
+  replay picker lists only the replay folder. `test/invariants.test.js` now checks the file, clipboard and vault
+  rules. The Install step honours `CLAUDE_CONFIG_DIR`, like Claude Code does, and never overwrites its first backup.
+- Housekeeping: the author and repository links no longer mention the old organisation name.
+
 ## 0.11.0
 - Guard: destructive commands (rm -rf outside build folders, git push --force, reset --hard, clean -fd, DROP TABLE,
   DELETE without WHERE, terraform destroy, kubectl delete, curl | sh, chmod 777, …) and secrets on a command line or
