@@ -159,7 +159,7 @@ warranty.
 
 | What | Where | Licence and terms |
 |---|---|---|
-| Plugin code, scripts, tools, tests, docs | `src/`, `scripts/`, `tools/`, `test/`, `dev/`, `docs/`, `ci/`, `*.md` | [MIT](LICENSE), © 2026 mucahitkumlay |
+| Plugin code, scripts, tools, tests, docs | `src/`, `scripts/`, `tools/`, `test/`, `dev/`, `docs/`, `.github/`, `*.md` | [MIT](LICENSE), © 2026 mucahitkumlay |
 | three.js (rendering) | bundled in `main.js` | MIT, © 2010–2026 three.js authors |
 | Brain surface, T1 volume, ventricles | `assets/brain.bin.gz`, `t1.bin.gz`, part of `inner.bin.gz` | MNI ICBM152 2009 template: free to use, copy, modify and distribute **with its copyright notice kept** (McConnell Brain Imaging Centre, MNI, McGill University) |
 | Gyrus labels, deep nuclei | `assets/aal.bin.gz`, part of `inner.bin.gz` | Derived from the AAL atlas (GIN-IMN, Bordeaux); used with attribution, see the notes on its terms |

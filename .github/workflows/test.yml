@@ -5,12 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Bun from npm, so the workflow needs nothing but GitHub's own actions
+      - run: npm install -g bun@1
       - run: bun install
       - run: bun run build
       - run: bun run test

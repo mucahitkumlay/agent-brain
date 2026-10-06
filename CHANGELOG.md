@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1
+- The project now lives at https://github.com/mucahitkumlay/agent-brain (the old address redirects). The anatomy files
+  are fetched from releases there.
+- CI uses only GitHub's own actions (Bun comes from npm), with read-only permissions for the test workflow.
+
 ## 0.9.0
 - Renamed from Claude Brain to **Agent Brain** (plugin id `agent-brain`). It works with Claude Code for now; the name
   no longer uses Anthropic's trademark. Settings carry over when you move `data.json` (see the README).
