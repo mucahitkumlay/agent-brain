@@ -24,7 +24,7 @@ const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1; }
   const p = new (Cls.default || Cls)(app, { dir: '.obsidian/plugins/agent-brain', version: '0.8.0' });
   const mesh = await p.loadBrainMesh();
   ok(mesh && mesh.nv > 50000, 'brain mesh fetched and parsed: ' + (mesh && mesh.nv) + ' vertices');
-  ok(/releases\/download\/0\.8\.0\/brain\.bin\.gz$/.test(urls[0]), 'from the release matching the version: ' + urls[0]);
+  ok(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/download\/anatomy-\d+\/brain\.bin\.gz$/.test(urls[0]), 'from the anatomy release: ' + urls[0]);
   ok(written['.obsidian/plugins/agent-brain/brain.bin.gz'] > 0, 'cached in the plugin folder');
   const A = await p.loadAnatomy();
   ok(A.aal && A.inner && A.t1 && A.tracts, 'all anatomy layers fetched');

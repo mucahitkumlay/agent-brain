@@ -19,9 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-Scope notes (not part of the MIT licence text above):
-- The anatomy data in assets/ is not covered by this licence. Each file keeps the terms of the data it was derived
-  from, listed in THIRD_PARTY_NOTICES.md (tracts.bin.gz is CC BY-SA 4.0).
-- This licence grants no rights to any trademark, including Claude, Claude Code, Anthropic and Obsidian.

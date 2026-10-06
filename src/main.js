@@ -10,7 +10,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { INSTALL_SH } from './scripts.js';
-import { REPO, ASSETS } from './generated.js';
+import { REPO, ASSET_RELEASE, ASSETS } from './generated.js';
 import { bashCategory, bashParts, psCategory, mcpCategory, shellTargets } from './intent.js';
 import { AAL, AAL_LOBE, GYRI, aalName, bundleName, parseAal, parseInner, parseT1, parseTracts, makeInner, makeTracts, makeSlice } from './anatomy.js';
 
@@ -3939,9 +3939,9 @@ class AgentBrainPlugin extends Plugin {
   pluginDir() { return this.manifest && this.manifest.dir ? this.manifest.dir : `${this.app.vault.configDir}/plugins/agent-brain`; }
   async fetchAsset(name) {
     const meta = ASSETS[name];
-    if (!meta || !REPO || typeof requestUrl !== 'function') throw new Error(name + ' is missing');
+    if (!meta || !REPO || !ASSET_RELEASE || typeof requestUrl !== 'function') throw new Error(name + ' is missing');
     if (!this._fetchNotice) this._fetchNotice = new Notice(`Agent Brain: downloading the brain anatomy (${(Object.values(ASSETS).reduce((n, a) => n + a.size, 0) / 1048576).toFixed(1)} MB) from the GitHub release. This happens once.`, 8000);
-    const url = `https://github.com/${REPO}/releases/download/${this.manifest.version}/${name}`;
+    const url = `https://github.com/${REPO}/releases/download/${ASSET_RELEASE}/${name}`;
     const res = await requestUrl({ url, method: 'GET', throw: false });
     if (res.status !== 200) throw new Error(`could not download ${name} (HTTP ${res.status})`);
     const ab = res.arrayBuffer;

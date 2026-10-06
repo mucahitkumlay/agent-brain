@@ -1,6 +1,7 @@
 # Third-party notices
 
-Agent Brain's own code is MIT-licensed (see `LICENSE`). It bundles one library and draws on public neuroimaging data,
+Agent Brain's own code is MIT-licensed (see `LICENSE`). That licence covers the code only: it does not cover the data
+in `assets/`, and it grants no rights to any trademark (Claude, Claude Code, Anthropic, Obsidian). It bundles one library and draws on public neuroimaging data,
 each under its own terms below. The data files in `assets/` were built with `tools/anatomy/build_anat.py` from files
 distributed with the [niivue](https://github.com/niivue/niivue) project (`packages/niivue/demos/images`).
 

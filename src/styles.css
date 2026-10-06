@@ -2,6 +2,7 @@
    Neutral, cool greys on black; one cool accent (the brain's own rim blue);
    warm amber only when something needs you; session hues carry identity. */
 
+.workspace-leaf-content .cb-root.view-content { padding: 0; }
 .cb-root.view-content {
   --cb-ink: #e7ebf2;
   --cb-mute: #8d96a7;
@@ -17,7 +18,7 @@
   --cb-mono: var(--font-monospace, ui-monospace, "Cascadia Mono", Consolas, monospace);
   position: relative;
   height: 100%;
-  padding: 0 !important;
+  padding: 0;
   overflow: hidden;
   background: #030407;
   color: var(--cb-ink);
@@ -92,7 +93,7 @@
 .cb-s.is-wait .cb-s-time { color: var(--cb-wait); }
 
 /* ---------- regions drawer (G) ---------- */
-.cb-regions { display: none; pointer-events: auto; border-radius: 12px; padding: 8px 10px; flex-direction: column; gap: 3px; overflow-y: auto; scrollbar-width: none; min-height: 0; }
+.cb-regions { display: none; pointer-events: auto; border-radius: 12px; padding: 8px 10px; flex-direction: column; gap: 3px; overflow-y: auto; min-height: 0; }
 .cb-show-regions .cb-regions { display: flex; }
 .cb-regions-h { display: flex; justify-content: space-between; color: var(--cb-mute); font-weight: 600; margin-bottom: 3px; }
 .cb-regions-h2 { color: var(--cb-faint); font-weight: 400; font-size: 11px; }
@@ -133,7 +134,7 @@
 .cb-banner-t { color: var(--cb-wait); font-size: 11px; }
 
 /* ---------- details panel (click a session or region) ---------- */
-.cb-panel { position: absolute; top: 12px; right: 12px; bottom: 62px; width: 330px; display: none; overflow-y: auto; padding: 14px 14px 10px; background: var(--cb-glass-hi); border-radius: 14px; pointer-events: auto; scrollbar-width: thin; z-index: 2; }
+.cb-panel { position: absolute; top: 12px; right: 12px; bottom: 62px; width: 330px; display: none; overflow-y: auto; padding: 14px 14px 10px; background: var(--cb-glass-hi); border-radius: 14px; pointer-events: auto; z-index: 2; }
 .cb-has-panel .cb-panel { display: block; }
 .cb-panel-wide .cb-panel { width: min(560px, calc(100% - 24px)); }
 .cb-has-panel.cb-has-tl .cb-panel { bottom: 152px; }
@@ -223,7 +224,7 @@
 @keyframes cb-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* ---------- H: hide everything but the brain and approvals ---------- */
-.cb-min .cb-tl, .cb-min .cb-log, .cb-min .cb-timeline, .cb-min .cb-info, .cb-min .cb-panel { display: none !important; }
+.cb-root.cb-min .cb-tl, .cb-root.cb-min .cb-log, .cb-root.cb-min .cb-timeline, .cb-root.cb-min .cb-info, .cb-root.cb-min .cb-panel { display: none; }
 .cb-min .cb-dock { opacity: 0; }
 .cb-min .cb-dock:hover { opacity: 1; }
 
@@ -233,7 +234,7 @@
 }
 
 /* ---------- mini view in the sidebar ---------- */
-.cb-mini .cb-dock, .cb-mini .cb-log, .cb-mini .cb-timeline, .cb-mini .cb-panel, .cb-mini .cb-info, .cb-mini .cb-regions, .cb-mini .cb-chev { display: none !important; }
+.cb-root.cb-mini .cb-dock, .cb-root.cb-mini .cb-log, .cb-root.cb-mini .cb-timeline, .cb-root.cb-mini .cb-panel, .cb-root.cb-mini .cb-info, .cb-root.cb-mini .cb-regions, .cb-root.cb-mini .cb-chev { display: none; }
 .cb-mini .cb-tl { display: flex; top: 8px; left: 8px; right: 8px; width: auto; }
 .cb-mini .cb-head { cursor: default; }
 .cb-mini .cb-s-name { max-width: 110px; }
@@ -267,7 +268,7 @@
 /* EEG-style traces, top right */
 .cb-eeg { position: absolute; right: 12px; top: 12px; width: 236px; display: none; padding: 7px 8px 6px; background: var(--cb-glass); border: 1px solid var(--cb-hair); border-radius: 12px; pointer-events: auto; z-index: 2; backdrop-filter: blur(10px); }
 .cb-show-eeg .cb-eeg { display: block; }
-.cb-has-panel .cb-eeg, .cb-mini .cb-eeg, .cb-min .cb-eeg { display: none !important; }
+.cb-root.cb-has-panel .cb-eeg, .cb-root.cb-mini .cb-eeg, .cb-root.cb-min .cb-eeg { display: none; }
 .cb-eeg-h { display: flex; justify-content: space-between; align-items: baseline; font-size: 10.5px; color: var(--cb-mute); margin: 0 2px 3px; }
 .cb-eeg-h > span:first-child { font-weight: 600; color: var(--cb-ink); letter-spacing: .04em; }
 .cb-eeg-s { color: var(--cb-faint); }
@@ -281,7 +282,7 @@
 .cb-banner-x:hover { color: var(--cb-ink); }
 .cb-p-alarm { display: flex; align-items: center; gap: 8px; color: #ff9d9d; }
 /* region memory */
-.cb-p-trace { height: 4px; padding: 0 !important; margin: 2px 0 6px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden; }
+.cb-p-row.cb-p-trace, .cb-p-trace { height: 4px; padding: 0; margin: 2px 0 6px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden; }
 .cb-p-trace-f { height: 100%; background: linear-gradient(90deg, #ff8a4c, #ffd27a); border-radius: 2px; }
 .cb-p-tag { flex: none; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; width: 62px; overflow: hidden; text-overflow: ellipsis; }
 
@@ -325,9 +326,8 @@
 .cb-d-acts { display: flex; gap: 4px; margin-left: auto; }
 .cb-d-act { height: 20px; padding: 0 7px; font-size: 10.5px; color: var(--cb-mute); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--cb-hair); border-radius: 6px; cursor: pointer; box-shadow: none; }
 .cb-d-act:hover { color: var(--cb-ink); }
-.cb-d-pre { margin: 0; padding: 7px 10px 8px; max-height: 420px; overflow: auto; font-family: var(--cb-mono); font-size: 11px; line-height: 1.5; color: #d5dbe6; white-space: pre-wrap; word-break: break-word; user-select: text; border-top: 1px solid var(--cb-hair); scrollbar-width: thin; }
-.cb-d-pre.is-clip { max-height: none; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
-.cb-d-pre.is-clip.is-tail { -webkit-mask-image: linear-gradient(transparent, #000 40%); mask-image: linear-gradient(transparent, #000 40%); }
+.cb-d-pre { margin: 0; padding: 7px 10px 8px; max-height: 420px; overflow: auto; font-family: var(--cb-mono); font-size: 11px; line-height: 1.5; color: #d5dbe6; white-space: pre-wrap; word-break: break-word; user-select: text; border-top: 1px solid var(--cb-hair); }
+.cb-d-pre.is-clip { max-height: none; overflow: hidden; color: #aab3c2; }
 .cb-d-blk.is-old { border-color: rgba(255, 107, 107, 0.35); } .cb-d-blk.is-old .cb-d-pre { background: rgba(255, 107, 107, 0.06); }
 .cb-d-blk.is-new { border-color: rgba(111, 211, 168, 0.35); } .cb-d-blk.is-new .cb-d-pre { background: rgba(111, 211, 168, 0.06); }
 .cb-d-blk.is-err { border-color: rgba(255, 107, 107, 0.4); } .cb-d-blk.is-err .cb-d-pre { color: #ffb4b4; }

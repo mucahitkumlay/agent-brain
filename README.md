@@ -64,11 +64,13 @@ no tokens.
 
 **With BRAT:** add `mucahitkumlay/agent-brain` in the BRAT plugin.
 
-**Manually:** download `main.js`, `manifest.json`, `styles.css` and the five `*.bin.gz` files from the
-[latest release](../../releases/latest) into `<your vault>/.obsidian/plugins/agent-brain/`, then enable the plugin.
+**Manually:** download `main.js`, `manifest.json` and `styles.css` from the [latest release](../../releases/latest)
+into `<your vault>/.obsidian/plugins/agent-brain/`, then enable the plugin.
 
-If the `*.bin.gz` anatomy files are missing (a plugin installed from the community list only gets the first three
-files), the plugin downloads them once from the release that matches its version and checks their SHA-256.
+The brain anatomy (five `*.bin.gz` files, about 3 MB) is not part of the plugin release. On first start the plugin
+downloads it once from this repository's [anatomy release](../../releases/tag/anatomy-1), checks every file against the
+SHA-256 sums built into `main.js` and keeps it in the plugin folder. To install fully offline, put those five files in
+the plugin folder yourself.
 
 Desktop only (it runs a small local HTTP listener).
 
@@ -109,6 +111,17 @@ Click a session for its plan, agents, energy and recent events (click an event f
 nucleus for its memory; a note to open it.
 The command palette has a demo (**Agent Brain: Play demo session**) if you want to see it without a real session.
 
+## Disclosures
+
+| | What and why |
+|---|---|
+| **Network** | One request per anatomy file, once: the download from this repository's anatomy release, checked by SHA-256. No telemetry, no analytics, no other servers. |
+| **Local server** | An HTTP listener on `127.0.0.1` only, so Claude Code's hooks can report to it. |
+| **Files outside the vault** | Uses Node's `fs` only when you press *Install* for the hooks: it edits `~/.claude/settings.json` (with a backup) and removes an older copy of the hooks from the vault's `.claude` settings. |
+| **Vault files** | Lists your notes to place them as neurons; reads and writes only the optional daily activity note. |
+| **Clipboard** | Writes to it only when you press a *Copy* button. Never reads it. |
+| **Account, payment, ads** | None. |
+
 ## Privacy, network and files
 
 - **Network:** the listener binds to `127.0.0.1` only. The plugin never calls a model and sends nothing anywhere. The
@@ -130,9 +143,9 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
 ## Build from source
 
 ```sh
-bun install          # or npm install
-bun run build        # dist/main.js, manifest.json, styles.css
-bun run test         # unit tests against dist/main.js
+npm ci               # exact versions from package-lock.json
+npm run build        # dist/main.js, manifest.json, styles.css
+npm test             # unit tests against dist/main.js
 ```
 
 `dev/` has a browser harness that runs the plugin outside Obsidian (`node dev/prepare.mjs`, see the file).

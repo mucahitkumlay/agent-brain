@@ -1,5 +1,5 @@
 // Prepares dev/www/: a browser page that runs the plugin outside Obsidian (Obsidian is mocked), for working on
-// the visuals. Build first (bun run build), then:  node dev/prepare.mjs && cd dev/www && python3 -m http.server 8799
+// the visuals. Build first (npm run build), then:  node dev/prepare.mjs && cd dev/www && python3 -m http.server 8799
 // and open http://127.0.0.1:8799, then run  __cbStart()  in the console (plugin.runDemo() plays the demo).
 import { mkdirSync, copyFileSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';

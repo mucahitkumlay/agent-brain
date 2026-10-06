@@ -14,13 +14,13 @@ Issues and pull requests are welcome.
 | `assets/` | anatomy data (see `tools/anatomy/README.md` and `THIRD_PARTY_NOTICES.md`) |
 | `test/` | node tests run against `dist/main.js`, including the security invariants |
 | `dev/` | browser harness with a mocked Obsidian |
-| `tools/build.mjs` | production build with the licence banner |
+| `tools/build.mjs` | build (esbuild) with the licence banner |
 
 ## Workflow
 
 ```sh
-bun install
-bun run build && bun run test
+npm ci
+npm run build && npm test
 node dev/prepare.mjs && (cd dev/www && python3 -m http.server 8799)   # then open the page and run __cbStart()
 ```
 
@@ -34,6 +34,8 @@ under the terms listed in `THIRD_PARTY_NOTICES.md`), and that you have the right
 ## Releases
 
 1. Bump the version in `manifest.json`, `package.json` and `versions.json`.
-2. Tag the commit with the bare version (`0.9.0`, no `v`) and push the tag. The release workflow builds the plugin and
-   attaches `main.js`, `manifest.json`, `styles.css` and the anatomy files to a new release.
-3. Check the release page.
+2. Tag the commit with the bare version (`0.9.3`, no `v`) and push the tag. The release workflow builds the plugin from
+   the locked dependencies, attests the build and attaches `main.js`, `manifest.json` and `styles.css` to a new release.
+3. The anatomy files live in their own release (`anatomy-1`). Only if they change: bump `config.anatomyRelease` in
+   `package.json` and publish the new files there with `gh release create anatomy-N --latest=false assets/*.bin.gz`.
+4. Check the release page.

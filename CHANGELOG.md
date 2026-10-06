@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.3
+- Releases carry only `main.js`, `manifest.json` and `styles.css`. The anatomy files moved to their own release
+  (`anatomy-1`), still downloaded once and checked by SHA-256.
+- Built with esbuild from a lockfile (`npm ci && npm run build`), so anyone can rebuild a release and compare; releases
+  are built by GitHub Actions and carry build-provenance attestations.
+- `LICENSE` is the plain MIT text again, so GitHub and the plugin directory recognise it; the scope notes (data in
+  `assets/`, trademarks) are in `THIRD_PARTY_NOTICES.md` and the README.
+- Styles: no `!important`, no CSS masks, no scrollbar styling (all flagged by the directory's checks).
+- README: a disclosures table (network, local server, files outside the vault, vault files, clipboard).
+
 ## 0.9.2
 - Sharper picture: the scene is now drawn with 4x multisample antialiasing (the canvas's own antialiasing never applied,
   since everything goes through the bloom pass), so gyri, fibres and outlines no longer show jagged edges.

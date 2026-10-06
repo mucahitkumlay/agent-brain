@@ -11,7 +11,7 @@ ok(!/\beval\s*\(|new Function\s*\(/.test(dist), 'no eval or new Function');
 ok(!/child_process|\bexecSync\b|\bspawn\s*\(/.test(code), 'never runs programs');
 ok(!/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|https?\.request\s*\(/.test(code), 'no network calls besides the one below');
 const reqs = code.match(/requestUrl\s*\(/g) || [];
-ok(reqs.length === 1 && /https:\/\/github\.com\/\$\{REPO\}\/releases\/download\//.test(code), 'one outgoing request: the anatomy files from this repository\'s release');
+ok(reqs.length === 1 && /https:\/\/github\.com\/\$\{REPO\}\/releases\/download\/\$\{ASSET_RELEASE\}\//.test(code), 'one outgoing request: the anatomy files from this repository\'s anatomy release');
 ok(/sha256/.test(code) && /did not match its checksum/.test(code), 'downloaded files are checked against built-in SHA-256 sums');
 ok(/listen\(port, '127\.0\.0\.1'/.test(code), 'the listener binds to 127.0.0.1 only');
 ok(/if \(!fromThisMachine\(req\.headers\)\)/.test(code), 'requests a web page could send are refused');

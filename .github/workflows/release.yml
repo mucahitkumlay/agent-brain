@@ -1,11 +1,14 @@
 name: Release
 
+# plugin versions only (0.9.3, no "v"); the anatomy release (anatomy-N) is published by hand and never built here
 on:
   push:
-    tags: ['*']
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
 
 permissions:
-  contents: write
+  contents: write       # create the release
+  id-token: write       # sign the build provenance
+  attestations: write   # store it
 
 jobs:
   release:
@@ -15,17 +18,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # Bun from npm, so the workflow needs nothing but GitHub's own actions
-      - run: npm install -g bun@1
-      - run: bun install
-      - run: bun run build
-      - run: bun run test
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
       - name: Check the tag matches the manifest
         run: test "$(node -p "require('./manifest.json').version")" = "${GITHUB_REF_NAME}"
+      - name: Attest where the files were built
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
       - name: Release (or refresh the files of an existing one)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          FILES="dist/main.js dist/manifest.json dist/styles.css assets/aal.bin.gz assets/brain.bin.gz assets/inner.bin.gz assets/t1.bin.gz assets/tracts.bin.gz"
+          FILES="dist/main.js dist/manifest.json dist/styles.css"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then gh release upload "$GITHUB_REF_NAME" $FILES --clobber
           else gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes $FILES; fi

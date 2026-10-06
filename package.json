@@ -1,6 +1,6 @@
 {
   "name": "agent-brain",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Obsidian plugin: watch your AI coding agent (Claude Code for now) work as live activity on a real MRI brain. Local only, uses no tokens.",
   "private": true,
   "license": "MIT",
@@ -10,12 +10,18 @@
   },
   "scripts": {
     "prepare-assets": "node tools/prepare.mjs",
-    "build": "node tools/prepare.mjs && bun tools/build.mjs && cp manifest.json src/styles.css dist/",
-    "dev": "node tools/prepare.mjs && bun build src/main.js --outfile dist/main.js --target=node --format=cjs --external obsidian --external http --external zlib --watch",
+    "build": "node tools/prepare.mjs && node tools/build.mjs",
+    "dev": "node tools/prepare.mjs && node tools/build.mjs --watch",
     "test": "node test/run.mjs",
     "harness": "node dev/prepare.mjs"
   },
   "dependencies": {
     "three": "0.186.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "config": {
+    "anatomyRelease": "anatomy-1"
   }
 }
