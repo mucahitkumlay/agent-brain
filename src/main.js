@@ -13,6 +13,7 @@ import { INSTALL_SH } from './scripts.js';
 import { REPO, ASSET_RELEASE, ASSETS } from './generated.js';
 import { bashCategory, bashParts, psCategory, mcpCategory, shellTargets } from './intent.js';
 import { riskyCommand, riskyScript, findSecrets, maskSecrets, UNTRUSTED_TOOLS, sensitivePath, egressCommand, secretDump, persistence, injectionText, lessonFor, agentToHook, scrubReplay, programOf, claimsOf, costCompare, muteKey, budgetHits, noteName, mdText, replayHtml, TEST_CMD, TESTS_ONLY, THEMES } from './insight.js';
+import { approvalRule, usageReport, BETTER, promptFeatures, foldOld, weekSeries, promptTips, claudeMdDraft } from './usage.js';
 import { makeSurfaceIndex, makeEndIndex, settle, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from './fibre.js';
 import { AAL, AAL_LOBE, GYRI, aalName, bundleName, parseAal, parseInner, parseT1, parseTracts, makeInner, makeTracts, makeSlice } from './anatomy.js';
 
@@ -30,7 +31,7 @@ const DEFAULTS = {
   showSessions: true, sessionsOpen: true, showActivity: false, showTimeline: false, showRegions: false,
   showInner: true, showTracts: true, showNotes: true, sliceOn: false, sliceAxis: 'x', slicePos: 0.5, sliceCut: true,
   traceMinutes: 90, vitals: true, showVitals: true,
-  telemetry: true, notifyStuck: true, dream: true, showEeg: true, callDetails: true, look: 'anatomy', realityCheck: true, notifyReality: true,
+  telemetry: true, notifyStuck: true, dream: true, showEeg: false, hintFreeze: false, callDetails: true, look: 'anatomy', realityCheck: true, notifyReality: true,
   guard: true, shield: true, notifyGuard: true, evidence: true, lessons: true, theme: 'night', coach: false, setupSeen: false,
   reduceMotion: 'auto', signalStyle: 'real', budgetSession: 0, budgetDay: 0, sessionNote: false,
 };
@@ -523,6 +524,7 @@ class BrainView extends ItemView {
     this.panel = null;                 // { kind: 'session'|'region', id }
     this.replay = null;                // { clock, speed, idx, until }
     this.tlRange = 60 * 60000;         // timeline window
+    this.tlFit = true;                 // fit the window to the sessions until a range is picked
     this.tlSpeed = 20;
     this.labelBlocks = [];
     this.nodes = []; this.links = []; this.byPath = new Map();
@@ -570,6 +572,7 @@ class BrainView extends ItemView {
     this.chipEl = head.createSpan({ cls: 'cb-chip' });
     this.chevEl = head.createSpan({ cls: 'cb-chev' });
     head.addEventListener('click', () => { if (this.mini) { this.plugin.activateView(); return; } this.plugin.settings.sessionsOpen = !this.plugin.settings.sessionsOpen; this.plugin.saveAll(); this.applyLayout(); });
+    this.nowEl = tl.createDiv({ cls: 'cb-now' });
     this.sessionsEl = tl.createDiv({ cls: 'cb-sessions' });
     this.watchEl = tl.createDiv({ cls: 'cb-watch' });
     this.regionsEl = tl.createDiv({ cls: 'cb-regions' });
@@ -577,6 +580,13 @@ class BrainView extends ItemView {
     this.logEl = root.createDiv({ cls: 'cb-log' });
     this.captionEl = root.createDiv({ cls: 'cb-caption' });
     this.bannerEl = root.createDiv({ cls: 'cb-banner' });
+    this.turnEl = root.createDiv({ cls: 'cb-turn' });
+    this.hintEl = root.createDiv({ cls: 'cb-hint' });
+    // a HUD rebuilt between mouse down and mouse up loses the click: hold the rebuild while a button is pressed
+    for (const el of [tl, this.bannerEl, this.turnEl, this.hintEl]) {
+      el.addEventListener('pointerdown', () => { this._hudPress = true; });
+    }
+    this.registerDomEvent(window, 'pointerup', () => { if (!this._hudPress) return; this._hudPress = false; window.setTimeout(() => this.requestHud && this.requestHud(), 50); });
     this.panelEl = root.createDiv({ cls: 'cb-panel' });
     this.panelEl.addEventListener('pointerenter', () => { this._panelHover = true; });
     this.panelEl.addEventListener('pointerleave', () => { this._panelHover = false; if (this.panel && this.panel.kind === 'session') this.renderPanel(); });
@@ -588,7 +598,8 @@ class BrainView extends ItemView {
     const seg = () => bar.createDiv({ cls: 'cb-seg' });
     const btn = (host, label, title, fn, cls) => { const b = host.createEl('button', { cls: 'cb-tl-btn' + (cls ? ' ' + cls : ''), text: label }); b.setAttr('title', title); this.registerDomEvent(b, 'click', (e) => { e.stopPropagation(); fn(b); }); return b; };
     const sr = seg();
-    this.rangeBtns = [[15, '15m'], [60, '1h'], [180, '3h'], [360, '6h']].map(([m, l]) => { const b = btn(sr, l, `Show the last ${l}`, () => { this.tlRange = m * 60000; this.drawTimeline(true); this.renderTlButtons(); }); b.dataset.m = String(m); return b; });
+    this.fitBtn = btn(sr, 'fit', 'Fit the window to the recent sessions', () => { this.tlFit = true; this.drawTimeline(true); this.renderTlButtons(); });
+    this.rangeBtns = [[15, '15m'], [60, '1h'], [180, '3h'], [360, '6h']].map(([m, l]) => { const b = btn(sr, l, `Show the last ${l}`, () => { this.tlFit = false; this.tlRange = m * 60000; this.drawTimeline(true); this.renderTlButtons(); }); b.dataset.m = String(m); return b; });
     const sp = seg();
     this.speedBtns = [5, 20, 60].map(x => { const b = btn(sp, x + '×', `Replay at ${x} times real speed`, () => { this.tlSpeed = x; if (this.replay) this.replay.speed = x; this.renderTlButtons(); }); b.dataset.x = String(x); return b; });
     this.liveBtn = btn(bar, 'Live', 'Back to live', () => this.stopReplay(), 'is-live');
@@ -609,7 +620,7 @@ class BrainView extends ItemView {
     this.kpiEl = this.infoEl.createDiv({ cls: 'cb-kpis' });
     this.srcEl = this.infoEl.createDiv({ cls: 'cb-srcs' });
     const keys = this.infoEl.createDiv({ cls: 'cb-keys' });
-    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy or atlas'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], ['[ ] or P N', 'Previous / next signal'], ['Enter', 'Open the selected signal'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
+    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['W', 'Watchers'], ['U', 'Use Claude Code better'], ['?', 'What can I do here?'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy or atlas'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], ['[ ] or P N', 'Previous / next signal'], ['Enter', 'Open the selected signal'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
       const r = keys.createDiv({ cls: 'cb-key-row' });
       r.createEl('kbd', { text: k }); r.createSpan({ text: d });
     }
@@ -655,7 +666,7 @@ class BrainView extends ItemView {
     this.dockEl = root.createDiv({ cls: 'cb-dock' });
     const dockBtn = (key, icon, label, fn) => {
       const b = this.dockEl.createEl('button', { cls: 'cb-dock-btn' });
-      b.setAttr('aria-label', label); b.setAttr('title', label);
+      b.setAttr('aria-label', label); b.dataset.tip = label;
       try { setIcon(b, icon); } catch (e) { b.setText(label[0]); }
       b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
       (this.dockBtns || (this.dockBtns = {}))[key] = b;
@@ -671,7 +682,10 @@ class BrainView extends ItemView {
     dockBtn('slice', 'scan-line', 'MRI slice (M)', () => this.toggleSlice());
     dockBtn('freeze', 'pause', 'Freeze time and look at the signals (Space)', () => this.toggleFreeze());
     this.dockEl.createSpan({ cls: 'cb-dock-sep' });
+    dockBtn('watch', 'shield', 'Watchers: what they caught (W)', () => this.togglePanelKind('watch'));
+    dockBtn('usage', 'trending-up', 'Use Claude Code better (U)', () => this.togglePanelKind('usage'));
     dockBtn('info', 'info', 'Numbers, connections and shortcuts (I)', () => this.toggleInfo());
+    dockBtn('guide', 'help-circle', 'What can I do here? (?)', () => this.togglePanelKind('guide'));
     this.registerDomEvent(root, 'click', () => { this.toggleInfo(false); this.togglePop('layers', false); });
     this.registerDomEvent(root, 'mousemove', () => this.wake());
     this.frozenEl = root.createDiv({ cls: 'cb-frozen-hint' });
@@ -2210,6 +2224,9 @@ class BrainView extends ItemView {
       else if (k === 'g') this.toggleUi('showRegions');
       else if (k === 'e') this.toggleUi('showEeg');
       else if (k === 'i') this.toggleInfo();
+      else if (k === 'w') this.togglePanelKind('watch');
+      else if (k === 'u') this.togglePanelKind('usage');
+      else if (k === '?') this.togglePanelKind('guide');
       else if (k === 'l') this.togglePop('layers');
       else if (k === 'm') this.toggleSlice();
       else if (k === 'v') this.setLook(this.plugin.settings.look === 'atlas' ? 'anatomy' : 'atlas', true);
@@ -2493,6 +2510,144 @@ class BrainView extends ItemView {
     const button = (r, label, fn, cta) => { const b = r.createEl('button', { cls: 'cb-p-btn' + (cta ? ' is-cta' : ''), text: label }); b.addEventListener('click', fn); return b; };
     const toRec = (r) => this.openPanel({ kind: 'signal', rec: r, tab: 'detail', back: Object.assign({}, this.panel) });
 
+    if (P.kind === 'usage') {
+      const R = p.usageNow();
+      title('Use Claude Code better', 'What your own turns show, week by week, and what would make them go better: how you work with it, how you prompt, and what each project\'s CLAUDE.md could say. Worked out on this computer; nothing is sent anywhere.', '#7fdca4');
+      const series = weekSeries(p.usage || [], p.usageWeeks || {}).filter(w => w.turns > 0);
+      const PT = promptTips(series);
+      const total = series.reduce((n, w) => n + w.turns, 0);
+      if (total < 5) {
+        sec('Not enough yet', `${total} turn${total === 1 ? '' : 's'} recorded`);
+        row('is-empty').setText('Suggestions need a few real turns of Claude Code (demos do not count). Work as usual; this fills in by itself.');
+      } else {
+        // week by week, every week recorded
+        sec('Week by week', `${series.length} week${series.length === 1 ? '' : 's'}, ${total} turns`);
+        const fmt = { turns: v => String(v), medianTurn: v => fmtDur(v), waitShare: v => Math.round(v * 100) + '%', failRate: v => Math.round(v * 100) + '%', correctedShare: v => Math.round(v * 100) + '%', warnPer10: v => v.toFixed(1), costPerTurn: v => '$' + v.toFixed(2), testedShare: v => v == null ? '–' : Math.round(v * 100) + '%' };
+        const names = { turns: 'Turns', medianTurn: 'Average turn', waitShare: 'Time it waited for you', failRate: 'Tool calls that failed', correctedShare: 'Answers you had to correct', warnPer10: 'Warnings per 10 turns', costPerTurn: 'Cost per turn', testedShare: 'Code changes that were tested' };
+        const dir = Object.assign({ turns: 0, correctedShare: -1 }, BETTER);
+        for (const k of Object.keys(names)) {
+          const vals = series.map(w => w[k]);
+          if (k === 'costPerTurn' && !vals.some(v => v > 0)) continue;
+          if (k === 'testedShare' && !vals.some(v => v != null)) continue;
+          const r = row('cb-u-row');
+          r.createSpan({ cls: 'cb-p-x', text: names[k] });
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          svg.setAttribute('class', 'cb-u-spark'); svg.setAttribute('viewBox', '0 0 80 18'); svg.setAttribute('preserveAspectRatio', 'none');
+          const nums = vals.filter(v => v != null), lo = Math.min(...nums), hi = Math.max(...nums), span = hi - lo || 1;
+          const pts = vals.map((v, i) => v == null ? null : `${(vals.length === 1 ? 40 : i / (vals.length - 1) * 78 + 1).toFixed(1)},${(16 - (v - lo) / span * 14).toFixed(1)}`).filter(Boolean).join(' ');
+          const pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline'); pl.setAttribute('points', pts); svg.appendChild(pl);
+          r.appendChild(svg);
+          const last = vals[vals.length - 1], first = nums[0];
+          const t = r.createSpan({ cls: 'cb-p-t', text: fmt[k](last) });
+          t.setAttr('title', `First week ${fmt[k](first)}, this week ${fmt[k](last)}`);
+          if (series.length > 1 && dir[k] && last != null && first != null && Math.abs(last - first) > Math.max(Math.abs(first) * 0.1, 1e-9)) r.addClass((last - first) * dir[k] > 0 ? 'is-better' : 'is-worse');
+        }
+        row('is-empty').setText('The line runs from the first week recorded to this one. Green: better than at the start, red: worse.');
+        // suggestions: how you use it, and how you prompt
+        const tips = R.tips.concat(PT.tips).sort((a, b) => b.weight - a.weight);
+        sec('Suggestions', tips.length ? `${tips.length}` : 'none');
+        if (!tips.length) row('is-empty').setText('Nothing stands out yet.');
+        for (const t of tips) {
+          const box = el.createDiv({ cls: 'cb-u-tip' + (t.id.startsWith('p-') ? ' is-prompt' : '') });
+          if (t.id.startsWith('p-')) box.createDiv({ cls: 'cb-u-tag', text: 'Prompting' });
+          box.createDiv({ cls: 'cb-u-t', text: t.title });
+          box.createDiv({ cls: 'cb-u-x', text: t.text });
+          box.createDiv({ cls: 'cb-u-h', text: t.how });
+          if (t.copy) { box.createEl('pre', { cls: 'cb-u-code', text: t.copy }); const b = box.createEl('button', { cls: 'cb-p-btn is-cta', text: t.copyLabel || 'Copy' }); b.addEventListener('click', () => { navigator.clipboard.writeText(t.copy); this.flash('Copied'); }); }
+          if (t.action === 'lessons') { const b = box.createEl('button', { cls: 'cb-p-btn is-cta', text: t.actionLabel }); b.addEventListener('click', () => this.openPanel({ kind: 'lessons', id: '', back: { kind: 'usage', id: '' } })); }
+        }
+        if (PT.prompts < 15) row('is-empty').setText(`Prompt suggestions start after 15 prompts (${PT.prompts} so far). They compare how your prompts went, never what they said.`);
+        // CLAUDE.md per project
+        const projs = new Map();
+        for (const x of p.usage || []) if (x.p) { const q = projs.get(x.p) || { n: 0, cm: 0 }; q.n++; q.cm = Math.max(q.cm, x.cm || 0); projs.set(x.p, q); }
+        for (const k of Object.keys(p.lessons || {})) if (!projs.has(k)) projs.set(k, { n: 0, cm: 0 });
+        const drafts = [...projs.entries()].map(([k, q]) => claudeMdDraft(k, p.usage || [], (p.lessons || {})[k], q.cm)).filter(Boolean).sort((a, b) => b.turns - a.turns).slice(0, 5);
+        if (drafts.length) {
+          sec('CLAUDE.md, per project', '');
+          row('is-empty').setText('CLAUDE.md is the file Claude Code reads at the start of every session in a project. These lines come only from what happened in that project.');
+          for (const d of drafts) {
+            const box = el.createDiv({ cls: 'cb-u-tip' });
+            box.createDiv({ cls: 'cb-u-t', text: d.proj });
+            box.createDiv({ cls: 'cb-u-h', text: (d.has ? 'Has a CLAUDE.md. Add these lines to it. ' : 'No CLAUDE.md was loaded in this project: run /init in Claude Code to create one, then add these lines. ') + 'Why: ' + d.why.join(', ') + '.' });
+            box.createEl('pre', { cls: 'cb-u-code', text: d.text });
+            const b = box.createEl('button', { cls: 'cb-p-btn is-cta', text: 'Copy for CLAUDE.md' }); b.addEventListener('click', () => { navigator.clipboard.writeText(d.text); this.flash('Copied: paste it into ' + d.proj + '/CLAUDE.md'); });
+          }
+        }
+      }
+      row('is-empty').setText('Kept: one line of numbers per turn for four weeks, then one line of sums per week for a year (durations, counts, cost, kinds of warnings, the first words of commands you approved, and yes/no features of each prompt such as "named a file"). Never the prompts themselves, file contents or paths.');
+      return;
+    }
+    if (P.kind === 'guide') {
+      title('What can I do here?', 'Everything Agent Brain does, and where to find it. Nothing here sends anything anywhere or costs tokens.', '#8ab4ff');
+      const item = (t, d, label, fn, key) => {
+        const r = row('cb-g-i');
+        const tx = r.createDiv({ cls: 'cb-g-tx' });
+        const h = tx.createDiv({ cls: 'cb-g-t', text: t });
+        if (key) h.createSpan({ cls: 'cb-g-k', text: key });
+        tx.createDiv({ cls: 'cb-g-d', text: d });
+        if (label) button(r, label, fn);
+      };
+      sec('While it works', '');
+      item('Do I need to act?', 'The line at the top left says it in one sentence: an approval, a session that may be stuck, warnings, or nothing.', '', null);
+      item('Who is doing what', 'One line per session: what it is doing now, its task list (2/3), and for how long. Click one to follow only that session.', 'Sessions', () => { this.closePanel(); if (!p.settings.showSessions) this.toggleUi('showSessions'); }, 'S');
+      item('Stop time on a call', 'Freeze every signal and click one: the command, who ran it (agent chain), why, where it goes, every parameter, the output.', 'Freeze', () => { this.closePanel(); this.toggleFreeze(true); }, 'Space');
+      item('Everything that happened', 'A list of every call as it comes in, and a timeline per session you can scrub back through.', 'Activity', () => { this.closePanel(); if (!p.settings.showActivity) this.toggleUi('showActivity'); }, 'A');
+      sec('Watchers', '');
+      item('Risky commands, injected instructions, false beliefs, loops', 'Guard, Shield, Reality check and Stuck run all the time. They only watch: nothing is stopped.', 'Open', () => this.openPanel({ kind: 'watch', id: '', back: { kind: 'guide', id: '' } }), 'W');
+      item('See them catch things', 'A short made-up session in which all four fire.', 'Try', () => { this.closePanel(); p.runCatchDemo(); });
+      sec('After a turn', '');
+      item('What it did', 'When a turn ends a card shows its calls, files, last test run, cost and warnings. The turn report shows what the answer rests on and a time map.', '', null);
+      const last = [...p.sessions.values()].filter(s => s.reports && s.reports.length).sort((a, b) => b.reports[b.reports.length - 1].t1 - a.reports[a.reports.length - 1].t1)[0];
+      item('Key moments of a session', 'Autopsy: the first failure, loops, findings, slow calls and waits.', last ? 'Open the latest' : '', last ? () => this.openPanel({ kind: 'autopsy', id: last.id, back: { kind: 'guide', id: '' } }) : null);
+      item('Lessons', 'Short facts per project from what went wrong and right, ready to paste into CLAUDE.md.', '', null);
+      item('Replays and comparison', 'Export a session as a replay anyone can play (names and secrets removed), or put two sessions side by side. In a session\'s panel, under "Look closer".', '', null);
+      sec('Get better at it', '');
+      item('Use Claude Code better', 'From your own turns: commands you keep approving (with the rule to stop), claims without proof, untested changes, loops, a full context, where the money went. This week against the last.', 'Open', () => this.openPanel({ kind: 'usage', id: '', back: { kind: 'guide', id: '' } }), 'U');
+      sec('Your vault', '');
+      item('Notes as neurons', 'Every note is a neuron, every link an axon. A connection grows between files Claude uses one after the other; signals follow it.', '', null);
+      item('Look and layers', 'Atlas look (see-through brain), anatomy layers and MRI slices.', 'Change look', () => { this.closePanel(); this.setLook(p.settings.look === 'atlas' ? 'anatomy' : 'atlas'); }, 'V');
+      sec('Try it all', '');
+      item('Made-up sessions', 'Four sessions at once: reading notes, waiting for an approval, a workflow of agents, a loop.', 'Play demo', () => { this.closePanel(); p.runDemo(); });
+      item('Setup check', 'Are the hooks installed, is telemetry on, is the graphics card used?', 'Open', () => this.openPanel({ kind: 'setup', back: { kind: 'guide', id: '' } }));
+      return;
+    }
+    if (P.kind === 'watch') {
+      title('Watchers', 'Four checks that run while Claude works. They only watch: nothing is stopped, and nothing leaves your computer.', '#8ab4ff');
+      const W = [
+        { k: 'guard', name: 'Guard', color: GUARD, key: 'guard', does: 'Notices commands that destroy things (rm -rf, git push --force, DROP TABLE, curl | sh) and secrets written out in the open (tokens, passwords).', why: 'So you hear about a risky step as it happens, not after the damage.' },
+        { k: 'shield', name: 'Injection shield', color: GUARD, key: 'shield', does: 'Notices when something Claude read from outside (a web page, a search result) talks to it, and what it does right after: reading credentials, sending data out, changing startup files.', why: 'A web page can try to give the agent orders. This shows when it may have worked.' },
+        { k: 'reality', name: 'Reality check', color: DOUBT, key: 'realityCheck', does: 'Notices when the agent believes something that is not so: a file or package that does not exist, text it tries to change that is not there, "the tests pass" after a failing run.', why: 'Agents sound sure even when they are wrong. This points at the evidence.' },
+        { k: 'stuck', name: 'Stuck', color: ERR, key: null, does: 'Notices a loop or a hang: the same command failing again and again, a command running for 20 minutes, or no progress for 10.', why: 'A stuck agent can burn time and money while you are away.' },
+      ];
+      const order = P.id ? [W.find(w => w.k === P.id), ...W.filter(w => w.k !== P.id)].filter(Boolean) : W;
+      const sessions = [...p.sessions.values()];
+      for (const w of order) {
+        const on = w.key ? p.settings[w.key] !== false : true;
+        const found = [];
+        if (w.k === 'stuck') for (const s of sessions) { if (s.alarm) found.push({ s, t: s.alarm.since, text: s.alarm.text, stuck: true }); }
+        else for (const s of sessions) for (const f of s.reality || []) if ((f.group || 'reality') === w.k) found.push({ s, t: f.t, text: f.text, f });
+        found.sort((a, b) => b.t - a.t);
+        sec(w.name, !on ? 'off' : found.length ? `${found.length} caught` : 'watching, nothing yet');
+        { const d = row('is-empty'); d.setText(w.does); d.style.color = 'var(--cb-ink)'; }
+        row('is-empty').setText(w.why);
+        for (const x of found.slice(0, 5)) {
+          const r = row('cb-p-ev cb-p-doubt is-click' + (w.k === 'stuck' ? '' : ' is-' + w.k));
+          r.createSpan({ cls: 'cb-p-t', text: hhmm(x.t, true) });
+          r.createSpan({ cls: 'cb-p-x', text: p.sessionLabel(x.s) + (p.isDemo(x.s) ? ' (demo)' : '') + ': ' + x.text });
+          r.setAttr('title', x.stuck ? 'Open the session' : 'Show the evidence');
+          r.addEventListener('click', () => {
+            const ev = x.f && (x.f.ref ? this.findRec(x.s.id, y => y.e === 'PreToolUse' && y.id === x.f.ref) : this.findRec(x.s.id, y => y.e === 'Doubt' && y.text === x.f.text));
+            if (ev) this.openPanel({ kind: 'signal', rec: ev, tab: 'detail', back: Object.assign({}, this.panel) });
+            else this.openPanel({ kind: 'session', id: x.s.id, back: Object.assign({}, this.panel) });
+          });
+        }
+        if (w.key) { const r = row(''); button(r, on ? 'Turn off' : 'Turn on', async () => { p.settings[w.key] = !on; await p.saveAll(); this.renderPanel(true); if (this.renderHud) this.renderHud(); }); }
+      }
+      sec('Try it', '');
+      row('is-empty').setText('Plays a made-up session in which the agent does something risky, reads a poisoned page, believes something false and gets stuck.');
+      button(row(''), 'See it catch things', () => p.runCatchDemo(), true);
+      return;
+    }
     if (P.kind === 'setup') {
       const st = p.setupStatus();
       title('Setup check', 'Is everything in place for Agent Brain to see your agents?', '#7fdca4');
@@ -2916,7 +3071,7 @@ class BrainView extends ItemView {
   renderPanel(force) {
     const el = this.panelEl, P = this.panel, p = this.plugin, now = Date.now();
     if (!el || !P) return;
-    if (/^(setup|lessons|autopsy|compare|project)$/.test(P.kind)) { if (!force && P._drawn) return; P._drawn = true; }
+    if (/^(setup|lessons|autopsy|compare|project|watch|guide|usage)$/.test(P.kind)) { if (!force && P._drawn) return; P._drawn = true; }
     // the session panel refreshes as events come in, but not while you are pointing at it (a click would be lost)
     if (!force && P.kind === 'session' && this._panelHover) return;
     if (P.kind === 'signal') {
@@ -2953,7 +3108,7 @@ class BrainView extends ItemView {
       d.addEventListener('click', () => this.openPanel({ kind: 'signal', rec: r, tab: 'detail', back: Object.assign({}, this.panel) }));
     };
 
-    if (/^(setup|lessons|autopsy|compare|project)$/.test(P.kind)) { this.renderExtraPanel(el, head, P, sec, row); return; }
+    if (/^(setup|lessons|autopsy|compare|project|watch|guide|usage)$/.test(P.kind)) { this.renderExtraPanel(el, head, P, sec, row); return; }
     if (P.kind === 'session') {
       const s = p.sessions.get(P.id);
       const recs = p.history.filter(r => r.sid === P.id);
@@ -3175,7 +3330,8 @@ class BrainView extends ItemView {
 
   renderTlButtons() {
     if (!this.rangeBtns) return;
-    for (const b of this.rangeBtns) b.toggleClass('is-on', Number(b.dataset.m) * 60000 === this.tlRange);
+    for (const b of this.rangeBtns) b.toggleClass('is-on', !this.tlFit && Number(b.dataset.m) * 60000 === this.tlRange);
+    if (this.fitBtn) this.fitBtn.toggleClass('is-on', !!this.tlFit);
     for (const b of this.speedBtns) b.toggleClass('is-on', Number(b.dataset.x) === (this.replay ? this.replay.speed : this.tlSpeed));
     this.liveBtn.toggleClass('is-on', !this.replay);
   }
@@ -3207,6 +3363,13 @@ class BrainView extends ItemView {
     ctx.clearRect(0, 0, W, H);
     const ui = this.fontUI();
     this.tlW = W; this.tlG = 104;
+    if (this.tlFit) {
+      // from the first event of the sessions seen in the last 6 hours, with a little room, never under 3 minutes
+      const Hx = this.plugin.history, lim = Date.now() - 6 * 3600000;
+      let first = Date.now();
+      for (let i = Hx.length - 1; i >= 0 && Hx[i].t >= lim; i--) first = Hx[i].t;
+      this.tlRange = Math.max(3 * 60000, Math.min(6 * 3600000, (Date.now() - first) * 1.12));
+    }
     const now = Date.now(), t0 = now - this.tlRange;
     const H2 = this.plugin.history;
     let i0 = H2.length; { let lo = 0, hi = H2.length; while (lo < hi) { const m = (lo + hi) >> 1; if (H2[m].t < t0) lo = m + 1; else hi = m; } i0 = lo; }
@@ -3256,7 +3419,7 @@ class BrainView extends ItemView {
     }
     ctx.globalAlpha = 1;
     // time axis
-    const step = this.tlRange <= 15 * 60000 ? 2 * 60000 : this.tlRange <= 3600000 ? 10 * 60000 : this.tlRange <= 3 * 3600000 ? 30 * 60000 : 3600000;
+    const step = this.tlRange <= 5 * 60000 ? 60000 : this.tlRange <= 15 * 60000 ? 2 * 60000 : this.tlRange <= 3600000 ? 10 * 60000 : this.tlRange <= 3 * 3600000 ? 30 * 60000 : 3600000;
     ctx.fillStyle = 'rgba(140,150,168,0.7)'; ctx.font = `9px ${mono}`; ctx.textAlign = 'center';
     for (let t = Math.ceil(t0 / step) * step; t < now; t += step) {
       const x = this.tlT2X(t);
@@ -3398,10 +3561,128 @@ class BrainView extends ItemView {
     });
   }
 
+  togglePanelKind(kind) { if (this.panel && this.panel.kind === kind) this.closePanel(); else this.openPanel({ kind, id: '' }); }
+
+  // the first time real signals move: say once that they can be stopped and opened
+  renderHint(list) {
+    const p = this.plugin;
+    if (!this.hintEl) return;
+    const show = !p.settings.hintFreeze && !this.frozen && !this.mini && list.some(s => !p.isDemo(s) && p.isLive(s));
+    if (show === !!this._hintOn) return;
+    this._hintOn = show; this.hintEl.empty(); this.hintEl.toggleClass('is-on', show);
+    if (!show) return;
+    this.hintEl.createDiv({ cls: 'cb-hint-t', text: 'Every moving dot is one real call of your agent.' });
+    this.hintEl.createDiv({ cls: 'cb-hint-d', text: 'Press Space to stop time, then click a dot: the exact command, who ran it, why, and what came back.' });
+    const bar = this.hintEl.createDiv({ cls: 'cb-turn-b' });
+    const done = async () => { p.settings.hintFreeze = true; await p.saveAll(); this._hintOn = null; this.renderHint(list); };
+    const a = bar.createEl('button', { cls: 'cb-p-btn is-cta', text: 'Stop time now' }); a.addEventListener('click', (e) => { e.stopPropagation(); this.toggleFreeze(true); done(); });
+    const b = bar.createEl('button', { cls: 'cb-p-btn', text: 'Got it' }); b.addEventListener('click', (e) => { e.stopPropagation(); done(); });
+  }
+
+  // one sentence that answers "do I need to do anything?"
+  renderNow(list, waiting, working) {
+    const p = this.plugin, E = this.nowEl; if (!E) return;
+    const stuck = list.filter(s => s.alarm), reply = list.filter(s => s.wait && s.wait.kind === 'input' && !p.isDemo(s));
+    let found = 0; for (const s of list) found += (s.reality || []).filter(f => f.important).length;
+    let level = 'ok', text, act = null;
+    const names = (a) => a.slice(0, 2).map(s => p.sessionLabel(s)).join(', ') + (a.length > 2 ? ` and ${a.length - 2} more` : '');
+    if (!p.serverOk) { level = 'bad'; text = 'Not listening, so no agent can be seen. Open the setup check.'; act = () => this.openPanel({ kind: 'setup' }); }
+    else if (waiting.length) { level = 'act'; text = `${names(waiting)} ${waiting.length > 1 ? 'are' : 'is'} waiting for your approval in Claude Code.`; act = () => this.toggleFocus(waiting[0].id); }
+    else if (stuck.length) { level = 'act'; text = `${names(stuck)} may be stuck: ${clip(stuck[0].alarm.text, 60)}.`; act = () => this.openPanel({ kind: 'session', id: stuck[0].id }); }
+    else if (found) { level = 'warn'; const demo = list.every(s => !(s.reality || []).some(f => f.important) || p.isDemo(s)); text = `${found} warning${found > 1 ? 's' : ''} worth a look${demo ? ' (demo)' : ''}. Nothing was stopped.`; act = () => this.openPanel({ kind: 'watch', id: '' }); }
+    else if (working.length) text = `${working.length} session${working.length > 1 ? 's' : ''} working. Nothing needs you.`;
+    else if (reply.length) text = `${names(reply)} finished and ${reply.length > 1 ? 'are' : 'is'} waiting for your next prompt.`;
+    else if (list.length || p.history.length) {
+      const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      let turns = 0, warn = 0;
+      for (let i = p.history.length - 1; i >= 0; i--) { const r = p.history[i]; if (r.t < +d0) break; if (String(r.sid || '').startsWith('demo-')) continue; if (r.e === 'Stop') turns++; else if (r.e === 'Doubt') warn++; }
+      const cost = p.tokensToday ? p.tokensToday().cost : 0;
+      const bits = []; if (turns) bits.push(`${turns} turn${turns > 1 ? 's' : ''}`); if (cost > 0) bits.push('$' + cost.toFixed(2)); if (warn) bits.push(`${warn} warning${warn > 1 ? 's' : ''}`);
+      text = 'All idle. Nothing needs you.' + (bits.length ? ' Today: ' + bits.join(' · ') + '.' : '');
+      if (warn) act = () => this.openPanel({ kind: 'watch', id: '' });
+      else {
+        const now2 = Date.now();
+        if (!this._tipsAt || now2 - this._tipsAt > 60000) { this._tipsAt = now2; try { this._tips = p.usageNow().tips.length; } catch (e) { this._tips = 0; } }
+        if (this._tips) { text += ` ${this._tips} suggestion${this._tips > 1 ? 's' : ''} to use Claude Code better ›`; act = () => this.openPanel({ kind: 'usage', id: '' }); }
+      }
+    }
+    else text = '';
+    const sig = level + '|' + text;
+    if (sig === this._nowSig) return;
+    this._nowSig = sig; E.empty();
+    E.className = 'cb-now is-' + level + (text ? '' : ' is-none');
+    if (!text) return;
+    E.createSpan({ cls: 'cb-now-dot' });
+    E.createSpan({ cls: 'cb-now-t', text });
+    E.setAttr('role', 'status');
+    E.toggleClass('is-click', !!act);
+    E.onclick = act ? (e) => { e.stopPropagation(); act(); } : null;
+  }
+
+  // nothing running yet: say what this view is for, and let people try each part
+  renderStart() {
+    const p = this.plugin, S = this.sessionsEl;
+    const box = S.createDiv({ cls: 'cb-start' });
+    if (!p.serverOk) { box.createDiv({ cls: 'cb-start-h', text: 'The listener is off.' }); return; }
+    box.createDiv({ cls: 'cb-start-h', text: 'Waiting for Claude Code' });
+    box.createDiv({ cls: 'cb-start-p', text: 'Start Claude Code and every session shows here. Until then, try what Agent Brain does:' });
+    const item = (title, desc, label, fn) => {
+      const r = box.createDiv({ cls: 'cb-start-i' });
+      const t = r.createDiv({ cls: 'cb-start-it' });
+      t.createDiv({ cls: 'cb-start-t', text: title });
+      t.createDiv({ cls: 'cb-start-d', text: desc });
+      const b = r.createEl('button', { cls: 'cb-start-b', text: label });
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    };
+    item('Watch agents work', 'Four made-up sessions: what each one does, where, and when it needs you.', 'Play', () => p.runDemo());
+    item('Stop time on a call', 'Freeze every signal and click one: the command, who ran it, why, and its output.', 'Try', () => {
+      p.runDemo();
+      window.setTimeout(() => { this.toggleFreeze(true); this.needsDraw = true; }, 6500);
+    });
+    item('See what it catches', 'Risky commands, a poisoned web page, false claims, a loop.', 'Try', () => p.runCatchDemo());
+    item('Check the setup', 'Are the hooks installed, is anything missing?', 'Open', () => this.openPanel({ kind: 'setup' }));
+    item('Everything it can do', 'A short tour of every part, with a button for each (also the ? button below).', 'Show', () => this.openPanel({ kind: 'guide', id: '' }));
+  }
+
+  // a turn just ended: what it did, whether it worked, and where to look
+  renderTurnCard(list) {
+    const p = this.plugin, E = this.turnEl; if (!E) return;
+    const now = Date.now();
+    let best = null;
+    for (const s of list) { const r = s.reports && s.reports[s.reports.length - 1]; if (r && now - r.t1 < 45000 && (!best || r.t1 > best.r.t1)) best = { s, r }; }
+    if (best && this._turnGone === best.s.id + ':' + best.r.t1) best = null;
+    const sig = best ? best.s.id + ':' + best.r.t1 : '';
+    if (sig === this._turnSig) return;
+    this._turnSig = sig; E.empty();
+    E.toggleClass('is-on', !!best);
+    if (!best) return;
+    const { s, r } = best;
+    const head = E.createDiv({ cls: 'cb-turn-h' });
+    const d = head.createSpan({ cls: 'cb-turn-dot' }); d.style.background = s.color;
+    head.createSpan({ cls: 'cb-turn-n', text: p.sessionLabel(s) + (p.isDemo(s) ? ' (demo)' : '') });
+    head.createSpan({ cls: 'cb-turn-s', text: `finished a turn in ${fmtDur(r.dur)}` });
+    const x = head.createSpan({ cls: 'cb-turn-x', text: '×' }); x.setAttr('title', 'Dismiss');
+    x.addEventListener('click', (e) => { e.stopPropagation(); this._turnGone = sig; this._turnSig = null; this.renderTurnCard(list); });
+    const facts = [`${r.calls} tool call${r.calls === 1 ? '' : 's'}`];
+    if (r.files && r.files.length) facts.push(`${r.files.length} file${r.files.length === 1 ? '' : 's'} touched`);
+    if (r.fails) facts.push(`${r.fails} failed`);
+    if (r.cost > 0) facts.push('$' + r.cost.toFixed(2));
+    E.createDiv({ cls: 'cb-turn-f', text: facts.join(' · ') });
+    if (r.tests != null) E.createDiv({ cls: 'cb-turn-l ' + (r.tests ? 'is-ok' : 'is-bad'), text: r.tests ? 'Its last test run passed.' : 'Its last test run failed.' });
+    if (r.findings) { const w = E.createDiv({ cls: 'cb-turn-l is-warn is-click', text: `${r.findings} warning${r.findings === 1 ? '' : 's'} in this turn. Show them ›` }); w.addEventListener('click', (e) => { e.stopPropagation(); this.openPanel({ kind: 'watch', id: '' }); }); }
+    else if (!r.sources && r.calls === 0) E.createDiv({ cls: 'cb-turn-l', text: 'It read and ran nothing: the answer rests on what it already knew.' });
+    const bar = E.createDiv({ cls: 'cb-turn-b' });
+    const b1 = bar.createEl('button', { cls: 'cb-p-btn is-cta', text: 'What it did' });
+    b1.setAttr('title', 'The turn report: what it rests on, a time map of the calls, failures, waits and cost');
+    b1.addEventListener('click', (e) => { e.stopPropagation(); this.openPanel({ kind: 'session', id: s.id }); });
+    const b2 = bar.createEl('button', { cls: 'cb-p-btn', text: 'Key moments' });
+    b2.setAttr('title', 'Autopsy: first failure, loops, findings, slow calls and waits in this session');
+    b2.addEventListener('click', (e) => { e.stopPropagation(); this.openPanel({ kind: 'autopsy', id: s.id }); });
+  }
+
   // the four watchers, always in view: what is being watched, and how many things each one has caught
   renderWatch(list) {
     const W = this.watchEl; if (!W) return;
-    W.empty();
     const p = this.plugin, st = p.settings;
     const cnt = { guard: 0, shield: 0, reality: 0 }, latest = {};
     for (const s of list) for (const f of s.reality || []) { const g = f.group || 'reality'; if (!(g in cnt)) continue; cnt[g]++; if (!latest[g] || f.t > latest[g].f.t) latest[g] = { s, f }; }
@@ -3413,21 +3694,28 @@ class BrainView extends ItemView {
       { k: 'stuck', name: 'Stuck', on: true, n: stuck.length, hit: stuck[0], tip: 'The same command failing again and again, a command running for 20 minutes, or no progress for 10.' },
     ];
     const total = items.reduce((a, x) => a + (x.on ? x.n : 0), 0);
+    // rebuild only when something changed: a button that is replaced between mouse down and mouse up loses the click
+    const sig = items.map(x => (x.on ? 1 : 0) + ':' + x.n).join('|') + (list.some(s => p.isDemo(s)) ? 'd' : '') + (list.length ? 's' : '');
+    if (sig === this._watchSig) return;
+    this._watchSig = sig; W.empty();
     W.setAttr('role', 'group'); W.setAttr('aria-label', 'Watchers: guard, shield, reality check, stuck');
+    const hd = W.createEl('button', { cls: 'cb-w-h' });
+    hd.createSpan({ cls: 'cb-w-ht', text: 'Watchers' });
+    const demo = list.some(s => p.isDemo(s) && (s.reality || s.alarm));
+    hd.createSpan({ cls: 'cb-w-hs', text: (demo ? 'demo · ' : '') + (total ? `${total} caught · what is this?` : 'all quiet · what is this?') });
+    hd.setAttr('title', 'Four checks that run while Claude works and tell you when something looks wrong. They only watch: nothing is stopped. Click for what each one does.');
+    hd.addEventListener('click', () => this.openPanel({ kind: 'watch', id: '' }));
     for (const it of items) {
       const b = W.createEl('button', { cls: 'cb-w cb-w-' + it.k + (!it.on ? ' is-off' : it.n ? ' is-hit' : '') });
       b.createSpan({ cls: 'cb-w-dot' });
       b.createSpan({ cls: 'cb-w-n', text: it.name });
       if (it.on && it.n) b.createSpan({ cls: 'cb-w-c', text: String(it.n) });
       const state = !it.on ? 'off (Settings)' : it.n ? `${it.n} caught` : 'watching';
-      b.setAttr('title', `${it.name}: ${state}. ${it.tip}`);
+      b.setAttr('title', `${it.name}: ${state}. ${it.tip} Click for details.`);
       b.setAttr('aria-label', `${it.name}: ${state}`);
-      b.addEventListener('click', () => {
-        if (it.hit) this.openPanel({ kind: 'session', id: it.hit.id });
-        else this.flash(`${it.name}: ${state}`);
-      });
+      b.addEventListener('click', () => this.openPanel({ kind: 'watch', id: it.k }));
     }
-    if (!total) {
+    if (!total && list.length) {
       const t = W.createEl('button', { cls: 'cb-w cb-w-try', text: 'See it catch things' });
       t.setAttr('title', 'Plays a made-up session in which the agent does something risky, reads a poisoned page, believes something false and gets stuck.');
       t.addEventListener('click', () => p.runCatchDemo());
@@ -3436,6 +3724,7 @@ class BrainView extends ItemView {
 
   renderHud() {
     if (!this.chipEl) return;
+    if (this._hudPress) return;
     const p = this.plugin, now = Date.now();
     const list = p.activeSessions();
     const waiting = list.filter(s => s.wait && s.wait.kind === 'approval');
@@ -3459,10 +3748,13 @@ class BrainView extends ItemView {
     if (this.dream) this.chipEl.setAttr('title', `Nothing is running, so the brain replays the work from ${hhmm(this.dream.from)} to ${hhmm(this.dream.to)}, the way the hippocampus replays the day in sleep.`);
     this.chipEl.setAttr('title', p.serverOk ? `Listening for Claude Code hooks on 127.0.0.1:${p.settings.port}` : `Could not open port ${p.settings.port}; change it in settings.`);
     this.renderWatch(list);
+    this.renderTurnCard(list);
+    this.renderHint(list);
 
     // sessions: one line each. Click one for its details.
     this.sessionsEl.empty();
-    if (!list.length) this.sessionsEl.createDiv({ cls: 'cb-empty', text: p.serverOk ? 'Sessions show up here when Claude Code starts.' : 'The listener is off.' });
+    this.renderNow(list, waiting, working);
+    if (!list.length) this.renderStart();
     for (const s of list) {
       const approval = s.wait && s.wait.kind === 'approval';
       const reply = s.wait && s.wait.kind === 'input';
@@ -4234,8 +4526,8 @@ class BrainView extends ItemView {
           ctx.font = `10.5px ${mono}`; const bw = ctx.measureText(body).width;
           return { ln, body, pw, w: 10 + pw + 8 + bw };
         });
-        ctx.font = `600 11px ${mono}`; const tw = ctx.measureText(cap(LOBES[k].label.toLowerCase())).width;
-        const fn = LOBES[k].fn.replace(' · ', ', ');
+        ctx.font = `600 11px ${mono}`; const tw = ctx.measureText(cap(LOBES[k].fn.replace(' · ', ', '))).width;
+        const fn = cap(LOBES[k].label.toLowerCase());
         ctx.font = `10px ${mono}`; const fw = lines.length ? 0 : ctx.measureText(fn).width;
         const w = Math.max(tw, fw, ...rows.map(r => r.w));
         const h = 13 + (lines.length ? lines.length * 14 + 1 : 13);
@@ -4267,7 +4559,7 @@ class BrainView extends ItemView {
         ctx.textAlign = 'left';
         const tx = (w) => bk.right ? bk.x : bk.x + bk.w - w;
         ctx.font = `600 11px ${mono}`; ctx.fillStyle = `rgba(236,240,247,${alpha})`;
-        const ttl = cap(LOBES[bk.k].label.toLowerCase());
+        const ttl = cap(LOBES[bk.k].fn.replace(' · ', ', '));
         ctx.fillText(ttl, tx(ctx.measureText(ttl).width), bk.top + 6);
         if (!bk.rows.length) {
           ctx.font = `10px ${mono}`; ctx.fillStyle = `rgba(150,160,178,${alpha})`;
@@ -4300,6 +4592,7 @@ class BrainView extends ItemView {
     for (const n of this.nodes) {
       const show = this.plugin.settings.showNotes !== false && (n === this.hover || (n.labelT > 0 && !this.mini));
       if (!show || !n.vis) continue;
+      if (n !== this.hover && (this.labelBlocks || []).some(bk => n.sx > bk.x - 90 && n.sx < bk.x + bk.w + 6 && n.sy > bk.top - 12 && n.sy < bk.top + bk.h + 8)) continue;
       const a = n === this.hover ? 0.95 : Math.min(0.92, n.labelT / 1.2);
       ctx.fillStyle = `rgba(240,244,250,${a})`;
       ctx.fillText(n.name, n.sx + 10, n.sy);
@@ -4333,7 +4626,7 @@ class BrainView extends ItemView {
 class AgentBrainPlugin extends Plugin {
   async onload() {
     const data = (await this.loadData()) || {};
-    const { memory, learned, daily, engram, regions, lessonsData, ...saved } = data;
+    const { memory, learned, daily, engram, regions, lessonsData, usageData, usageWeeks, ...saved } = data;
     this.settings = Object.assign({}, DEFAULTS, saved);
     // older versions only had fps (60 or 30): Battery stays Battery, everyone else gets the adaptive rate
     if (!saved || saved.frameRate == null) this.settings.frameRate = saved && Number(saved.fps) === 30 ? '30' : 'auto';
@@ -4359,6 +4652,9 @@ class AgentBrainPlugin extends Plugin {
     const L0 = lessonsData || (saved.lessons && typeof saved.lessons === 'object' ? saved.lessons : null);
     if (saved.lessons && typeof saved.lessons === 'object') this.settings.lessons = true;
     this.lessons = L0 && typeof L0 === 'object' && !Array.isArray(L0) ? L0 : {};   // per gyrus / nucleus: what happened there
+    // one small entry per finished turn for four weeks, then one line of sums per week (a year at most)
+    this.usageWeeks = usageWeeks && typeof usageWeeks === 'object' && !Array.isArray(usageWeeks) ? usageWeeks : {};
+    this.usage = foldOld(Array.isArray(usageData) ? usageData.filter(x => x && Number(x.t) > 0) : [], this.usageWeeks, Date.now(), 28);
     this.history = [];
     this.sources = new Map();
     this.sessions = new Map();
@@ -4413,7 +4709,7 @@ class AgentBrainPlugin extends Plugin {
     for (const k in E.n) eng.n[k] = E.n[k].map(r);
     for (const k in E.f) eng.f[k] = r(E.f[k]);
     this.pruneRegionMem();
-    await this.saveData(Object.assign({}, this.settings, { memory: this.memory, learned: this.learned, daily: this.daily, engram: eng, regions: this.regionMem, lessonsData: this.lessons || {} }));
+    await this.saveData(Object.assign({}, this.settings, { memory: this.memory, learned: this.learned, daily: this.daily, engram: eng, regions: this.regionMem, lessonsData: this.lessons || {}, usageData: this.usage || [], usageWeeks: this.usageWeeks || {} }));
   }
 
   /* ---------- shared neural geometry: gyrus anchors and fibre endpoints, the same for every view ---------- */
@@ -5015,6 +5311,7 @@ class AgentBrainPlugin extends Plugin {
     }
   }
   raiseAlarm(s, key, text) {
+    if (s.turnCheck) s.turnCheck.stuck = true;
     const now = Date.now();
     const same = s.alarm && s.alarm.key === key;
     s.alarm = { key, text, since: same ? s.alarm.since : now, at: now, notified: same ? s.alarm.notified : false };
@@ -5425,7 +5722,16 @@ class AgentBrainPlugin extends Plugin {
   checkReality(rec, ev, s, a, now) {
     const e = rec.e;
     if (e === 'UserPromptSubmit' || !s.turnCheck) s.turnCheck = { tests: [], misses: [], sources: [], taint: null, fails: {}, t0: now, cost0: this.costOf(s), waitAt: 0, waitMs: 0 };
-    if (e === 'UserPromptSubmit') return;
+    if (e === 'InstructionsLoaded' && /(^|[\\/])CLAUDE(\.local)?\.md$/i.test(String(ev.file_path || '')) && ev.cwd && String(ev.file_path).replace(/\\/g, '/').startsWith(String(ev.cwd).replace(/\\/g, '/'))) s.hasCm = true;   // the project's own, not the one in your home folder
+    if (e === 'UserPromptSubmit') {
+      // a few yes/no features of the prompt, never its text; a correction ("no, …", "revert") marks the turn before as corrected
+      const pf = promptFeatures(ev.prompt);
+      s.turnCheck.pf = pf;
+      // the turn before in this session, or (a resumed or continued session has a new id) the last one in this project
+      const prev = s.lastUsage || ((this.lastUsageByProj || {})[s.project || ''] || null);
+      if (pf && pf.r && prev && now - prev.t < 30 * 60000) { prev.rx = 1; this.memDirty = true; }
+      return;
+    }
     const T = s.turnCheck;
     this.watchTurn(rec, ev, s, a, now, T);
     if (this.settings.guard !== false || this.settings.shield !== false) this.checkGuard(rec, ev, s, a, now, T);
@@ -5513,6 +5819,39 @@ class AgentBrainPlugin extends Plugin {
       }
     }
   }
+  // one small entry per finished turn, for "Use Claude Code better": numbers, finding kinds and what was approved. No text, no paths.
+  recordUsage(s, rep, T, recs) {
+    const ap = [];
+    for (let i = 0; i < recs.length; i++) {
+      const r = recs[i];
+      if (r.e !== 'PermissionRequest') continue;
+      let pre = null;
+      for (let j = i - 1; j >= 0; j--) { const q = recs[j]; if (q.e === 'PreToolUse' && q.tool === r.tool && (q.aid || '') === (r.aid || '') && (!r.id || q.id === r.id)) { pre = q; break; } }
+      if (!pre) continue;
+      const rule = approvalRule(pre.tool, pre.key || '');
+      if (!rule) continue;
+      let o = '', w = 0;
+      for (let j = i + 1; j < recs.length; j++) { const q = recs[j]; if (q.id && q.id === pre.id && /^(PostToolUse|PostToolUseFailure|PermissionDenied)$/.test(q.e)) { o = q.e === 'PermissionDenied' ? 'd' : 'a'; w = q.t - r.t; break; } }
+      if (o) ap.push({ k: rule.key, r: rule.rule, l: rule.label, o, w: Math.max(0, Math.min(w, 3600000)) });
+    }
+    const M = this.metab && this.metab.get(s.id);
+    const kinds = (s.reality || []).filter(f => f.t >= T.t0).map(f => f.kind || '').filter(Boolean);
+    const U = this.usage || (this.usage = []);
+    const entry = { t: rep.t1, p: s.project || '', d: rep.dur, w: rep.wait, c: rep.calls, f: rep.fails, n: rep.findings, k: kinds.slice(0, 12), $: Math.round(rep.cost * 1e4) / 1e4, ts: rep.tests, e: rep.files.length, st: !!T.stuck, cx: M && M.ctx ? Math.round(100 * M.ctx / ctxLimit(M)) / 100 : 0, ap: ap.slice(0, 20), pf: T.pf || null, cm: s.hasCm ? 1 : 0 };
+    U.push(entry); s.lastUsage = entry; (this.lastUsageByProj || (this.lastUsageByProj = {}))[s.project || ''] = entry;
+    if (U.length && U[0].t < Date.now() - 29 * 86400000) this.usage = foldOld(U, this.usageWeeks || (this.usageWeeks = {}), Date.now(), 28);
+    while (this.usage.length > 4000) this.usage.shift();
+    this.memDirty = true;
+  }
+  usageNow() {
+    const now = Date.now();
+    const tc = {}; let lessons = 0;
+    for (const [proj, list] of Object.entries(this.lessons || {})) for (const x of list) { lessons++; if (x.kind === 'testcmd') tc[proj] = x; }
+    const best = Object.values(tc).sort((a, b) => b.n - a.n)[0];
+    const cmd = best ? (String(best.text).match(/`([^`]+)`/) || [])[1] : '';
+    return usageReport(this.usage || [], now, { testCmd: cmd || '', lessons });
+  }
+
   // the end of a turn: how long, on what, waiting for whom, with what result
   endTurn(rec, s, now, T) {
     if (T.waitAt) { T.waitMs += now - T.waitAt; T.waitAt = 0; }
@@ -5540,8 +5879,10 @@ class AgentBrainPlugin extends Plugin {
       retries: Object.values(T.fails).reduce((n, k) => n + Math.max(0, k - 1), 0),
       findings: (s.reality || []).filter(f => f.t >= T.t0).length, cost: Math.max(0, this.costOf(s) - T.cost0),
       segs: segs.slice(0, 400), sources: T.sources.length,
+      tests: (() => { const t = (T.tests || []).filter(x => !x.aid && x.ok !== null); return t.length ? t[t.length - 1].ok : null; })(),
     };
     rec.report = rep; rec.sources = T.sources.slice();
+    if (!this.isDemo(s) && !this._replaying && this.settings.usage !== false) this.recordUsage(s, rep, T, recs);
     const L = s.reports || (s.reports = []); L.push(rep); if (L.length > 12) L.shift();
     s.turnCheck = null;   // the next turn starts clean, even when no new prompt comes first
   }
@@ -5561,6 +5902,7 @@ class AgentBrainPlugin extends Plugin {
     }
     if (e !== 'PostToolUse' && e !== 'PostToolUseFailure') { if (e === 'Stop' && !a) this.checkClaims(s, ev, now); return; }
     const out = outputText(ev), failed = e === 'PostToolUseFailure';
+    if (!failed && !a) this.retireLessons(s, tool, ti, out);
     const t = rec.id ? T.tests.find(x => x.id === rec.id) : null;
     if (t) { t.ok = !failed && !testFailed(out); if (t.ok && !a) { const tm = String(ti.command || '').match(TESTS_ONLY); if (tm) this.addLesson(s, 'testcmd', tm[0]); } }
     if (tool === 'Grep' && !failed) {
@@ -5578,7 +5920,8 @@ class AgentBrainPlugin extends Plugin {
       else if ((m = out.match(/npm (?:ERR!|error) 404\s+'(@?[^'@\s]+)(?:@[^']*)?' is not in/) || out.match(/404 Not Found - GET https?:\/\/registry\.npmjs\.org\/(@?[\w.-]+(?:\/[\w.-]+)?)/) || out.match(/No matching distribution found for ([\w.\-\[\]=<>]+)/) || out.match(/Could not find a version that satisfies the requirement ([\w.\-\[\]=<>]+)/))) flag('nopackage', `Tried to install a package that does not exist: ${m[1]}.`, m[1]);
       else if ((m = out.match(/Missing script: "?([\w:.-]+)"?/))) flag('noscript', `Ran an npm script the project does not have: ${m[1]}.`, m[1]);
       else if ((m = out.match(/pathspec '([^']+)' did not match/))) flag('nopath', `Pointed git at something that is not there: ${m[1]}.`);
-    } else if (tool === 'WebFetch' && (failed || /\b404\b.{0,20}not found|status(?: code)?:? 404/i.test(out))) flag('nourl', `Fetched a web address that does not exist: ${ti.url || ''}.`);
+    // only a page or a host that is not there; a blocked network, a proxy, a timeout or a refusal says nothing about the address
+    } else if (tool === 'WebFetch' && /\b404\b.{0,20}not found|status(?: code)?:? 404|\b410\b.{0,10}gone|ENOTFOUND|getaddrinfo|could not resolve|name or service not known|no such host|NXDOMAIN/i.test(out) && !/proxy|refused|ECONNREFUSED|timed? ?out|ETIMEDOUT|blocked|denied|forbidden|\b40[13]\b|\b5\d\d\b|rate limit/i.test(out)) flag('nourl', `Fetched a web address that does not exist: ${ti.url || ''}.`);
   }
   // at the end of a turn: what Claude says it achieved, against what the turn shows
   checkClaims(s, ev, now) {
@@ -5758,6 +6101,27 @@ class AgentBrainPlugin extends Plugin {
     const x = list.find(y => y.text === text);
     if (x) { x.n++; x.t = Date.now(); }
     else { list.push({ text, kind, t: Date.now(), n: 1 }); if (list.length > 60) list.splice(0, list.length - 60); }
+    this.memDirty = true;
+  }
+  // a lesson that stopped being true: the script now exists, the program is installed, the file is there, the command passes
+  retireLessons(s, tool, ti, out) {
+    const list = this.lessons && this.lessons[s.project || 'unknown'];
+    if (!list || !list.length || this._replaying) return;
+    const cmd = String(ti.command || ''), shell = tool === 'Bash' || tool === 'PowerShell';
+    if (shell && (testFailed(out) || /command not found|not recognized|Missing script|ERR!|Error:/i.test(out))) return;
+    const progs = shell ? bashParts(cmd, 12).map(x => x.cmd) : [];
+    const gone = list.filter(l => {
+      const d = (String(l.text).match(/`([^`]+)`/) || [])[1] || '';
+      if (!d) return false;
+      if (shell && l.kind === 'noscript') return new RegExp('(^|[\\s;&|(])' + d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\s|$)').test(cmd);
+      if (shell && l.kind === 'nocommand') return progs.includes(d);
+      if (shell && l.kind === 'repeatfail') return cmd.includes(d);
+      if (/^(Read|Edit|Write)$/.test(tool) && l.kind === 'missing') return baseName(String(ti.file_path || '')) === d || String(ti.file_path || '').endsWith('/' + d);
+      return false;
+    });
+    if (!gone.length) return;
+    for (const l of gone) list.splice(list.indexOf(l), 1);
+    if (!list.length) delete this.lessons[s.project || 'unknown'];
     this.memDirty = true;
   }
   removeLesson(proj, text) {
@@ -6354,6 +6718,9 @@ class BrainSettingTab extends PluginSettingTab {
       .addToggle(t => t.setValue(this.plugin.settings.evidence !== false).onChange(async (v) => { this.plugin.settings.evidence = v; await save(); }));
     new Setting(containerEl).setName('Lessons').setDesc('Remembers short facts per project (the test command that works, a command that is not installed, a package that does not exist, a file it keeps editing from memory). Only program and file names are kept. Command palette: "Show lessons learned per project", to copy them into CLAUDE.md or a note.')
       .addToggle(t => t.setValue(this.plugin.settings.lessons !== false).onChange(async (v) => { this.plugin.settings.lessons = v; await save(); }));
+    new Setting(containerEl).setName('Use Claude Code better').setDesc('Keeps one line of numbers per finished turn (durations, counts, cost, kinds of warnings, the first words of commands you approved, yes/no features of each prompt) for the "Use Claude Code better" panel: four weeks in detail, then weekly sums for a year. Never prompts, file contents or paths. Off: nothing new is recorded.')
+      .addToggle(t => t.setValue(this.plugin.settings.usage !== false).onChange(async (v) => { this.plugin.settings.usage = v; await save(); }))
+      .addButton(b => b.setButtonText('Clear history').onClick(async () => { this.plugin.usage = []; this.plugin.usageWeeks = {}; this.plugin.lastUsageByProj = {}; for (const s of this.plugin.sessions.values()) s.lastUsage = null; await this.plugin.saveAll(); new Notice('Agent Brain: usage history cleared.'); }));
     new Setting(containerEl).setName('Coach mode').setDesc('Off by default. When on, guard, shield and important reality-check findings are sent back to Claude Code as context on its next tool result ("[Agent Brain] …"), so the agent can check itself. Never a decision and never a block: the agent reads it as a note. Needs the hooks installed again after you turn it on.')
       .addToggle(t => t.setValue(this.plugin.settings.coach === true).onChange(async (v) => { this.plugin.settings.coach = v; await save(); new Notice(`Agent Brain: coach mode ${v ? 'on' : 'off'}. Install the hooks again (Settings → Claude Code hooks → Install) for it to take effect.`, 8000); }));
     new Setting(containerEl).setName('Desktop notifications').setDesc('When Obsidian is in the background, also show a system notification.')

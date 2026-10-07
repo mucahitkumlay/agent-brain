@@ -56,6 +56,14 @@ setTimeout(async () => {
   await tool('Read', { file_path: PROJ + '/src/ghost.ts' }, { error: 'File does not exist' });
   await tool('Bash', { command: 'npm test' }, { stdout: '1 failing', stderr: 'FAIL', exit_code: 1 });
   await send({ hook_event_name: 'MessageDisplay', display_content: 'Fixed. All tests pass now.', is_final_chunk: true }); await send({ hook_event_name: 'Stop', last_assistant_message: 'Fixed. All tests pass now.' });
+  { const b = p.history.length; const tid = 'wf1';
+    await send({ hook_event_name: 'PreToolUse', tool_name: 'WebFetch', tool_use_id: tid, tool_input: { url: 'https://example.com' } });
+    await send({ hook_event_name: 'PostToolUseFailure', tool_name: 'WebFetch', tool_use_id: tid, tool_input: { url: 'https://example.com' }, error: 'proxy refused the connection' });
+    const tid2 = 'wf2';
+    await send({ hook_event_name: 'PreToolUse', tool_name: 'WebFetch', tool_use_id: tid2, tool_input: { url: 'https://example.com/nope' } });
+    await send({ hook_event_name: 'PostToolUseFailure', tool_name: 'WebFetch', tool_use_id: tid2, tool_input: { url: 'https://example.com/nope' }, error: 'Request failed with status code 404 Not Found' });
+    const d = p.history.slice(b).filter(r => r.e === 'Doubt' && r.kind === 'nourl').map(r => r.text);
+    T('7b a blocked network is not "an address that does not exist"; a 404 is', d.length === 1 && /nope/.test(d[0]), JSON.stringify(d)); }
   const rc = p.history.slice(b5).filter(r => r.e === 'Doubt'); T('7 reality check (claims pass after failing run / missing file)', rc.length > 0, rc.map(r => r.text).join(' || '));
   // stuck
   { for (let i = 0; i < 3; i++) { const tid='f'+i; await send({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: tid, tool_input: { command: 'npm run build' } }); await send({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_use_id: tid, tool_input: { command: 'npm run build' }, error: 'Exit code 2\nerror TS2304' }); }
@@ -64,6 +72,29 @@ setTimeout(async () => {
   const sr = p.history.filter(r => r.e === 'Stop'); T('8b Stop recorded with a report', sr.length > 0 && sr.some(r => r.report), JSON.stringify(sr.map(r => r.report ? Object.keys(r.report).slice(0,8) : null)));
   // lessons / turn report / autopsy
   const rr = (sr.find(r => r.report) || {}).report; T('9 turn report has files/cmds/fails/cost', !!rr && 'dur' in rr && 'calls' in rr && 'fails' in rr, rr ? JSON.stringify({calls: rr.calls, cmds: rr.cmds, fails: rr.fails, findings: rr.findings, files: rr.files}) : 'none');
+  { await new Promise(r => setTimeout(r, 1600));   // the listener drops a repeat of the same prompt or stop within 1.5 s (two hook configs)
+    const before = (p.usage || []).length;
+    await send({ hook_event_name: 'UserPromptSubmit', prompt: 'run the tests and make sure they pass' });
+    for (let i = 0; i < 2; i++) { const tid = 'pa' + i; await send({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: tid, tool_input: { command: 'npm test' } }); await send({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_use_id: tid, tool_input: { command: 'npm test' } }); await send({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: tid, tool_input: { command: 'npm test' }, tool_response: { stdout: 'ok' } }); }
+    await send({ hook_event_name: 'Stop', last_assistant_message: 'Ran them.' });
+    await new Promise(r => setTimeout(r, 1600));
+    await send({ hook_event_name: 'UserPromptSubmit', prompt: 'no, that is wrong, revert it' });
+    const u = (p.usage || [])[(p.usage || []).length - 1];
+    await new Promise(r => setTimeout(r, 1600));
+    await send({ hook_event_name: 'SessionStart', session_id: 'S2' });
+    await send({ hook_event_name: 'UserPromptSubmit', session_id: 'S2', prompt: 'add a discount' });
+    await send({ hook_event_name: 'Stop', session_id: 'S2' });
+    const u2 = p.usage[p.usage.length - 1];
+    await send({ hook_event_name: 'SessionStart', session_id: 'S3' });
+    await send({ hook_event_name: 'UserPromptSubmit', session_id: 'S3', prompt: 'no, revert the discount' });
+    T('9c a correction in a continued session (new id, same project) marks the turn it corrects', u2.rx === 1, JSON.stringify(u2));
+    T('9b usage: one entry per turn, approvals with their rule, prompt features, the correction marks it, no prompt text', (p.usage || []).length > before && u.ap.length === 2 && u.ap[0].r === 'Bash(npm test:*)' && u.ap[0].o === 'a' && u.pf && u.pf.d === 1 && u.rx === 1 && !JSON.stringify(p.usage).includes('make sure they pass') && !JSON.stringify(p.usage).includes('revert'), JSON.stringify(u)); }
+  { const proj = [...p.sessions.values()].find(x => x.id === 'S').project;
+    p.lessons[proj] = (p.lessons[proj] || []).concat([{ text: 'There is no `npm run build` in this project; check package.json scripts first.', kind: 'noscript', n: 1, t: Date.now() }, { text: '`ghost.ts` does not exist; find the right path before reading it.', kind: 'missing', n: 1, t: Date.now() }]);
+    await send({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'ok1', tool_input: { command: 'npm run build' } });
+    await send({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'ok1', tool_input: { command: 'npm run build' }, tool_response: { stdout: 'built in 1s' } });
+    const L = (p.lessons[proj] || []).map(l => l.text);
+    T('9d a lesson that stopped being true goes away (the build script now exists); the others stay', !L.some(t => /npm run build/.test(t)) && L.some(t => /ghost\.ts/.test(t)), JSON.stringify(L)); }
   T('10 lessons or engram written', Object.keys(p.engram.a).length >= 4 && Object.keys(p.engram.n).length >= 2, Object.keys(p.engram.a).join(',') + ' / ' + Object.keys(p.engram.n).join(','));
   // wrong origin
   { const bad = await new Promise((res) => { const r = http.request({ host: '127.0.0.1', port: p.settings.port, method: 'POST', path: '/event', headers: { 'content-type': 'application/json', origin: 'https://evil.example' } }, (x) => { x.resume(); x.on('end', () => res(x.statusCode)); }); r.on('error', () => res(0)); r.end(JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'EVIL', cwd: '/x' })); });

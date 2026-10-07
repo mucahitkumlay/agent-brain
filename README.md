@@ -10,6 +10,25 @@ no tokens.
 
 ![Agent Brain overview](docs/images/overview.png)
 
+## What you get when you open it
+
+- **One sentence that says whether you need to act**: a session waiting for your approval, a session that may be stuck,
+  warnings worth a look, or "Nothing needs you".
+- **A card when a turn ends**: how long it took, how many tool calls, which files, whether its last test run passed, the
+  cost, and any warnings, with *What it did* (the turn report) and *Key moments* (the autopsy) one click away.
+- **A start screen before the first session** with things to try right away: watch made-up sessions, stop time on a
+  call, see what the watchers catch, and the setup check.
+- **A map of everything** behind the ? button: every part in plain words with a button to open or try it, and a hint
+  the first time real signals move that <kbd>Space</kbd> stops time so you can open one.
+- **Use Claude Code better.** From your own last two weeks: this week against the last, and suggestions with the numbers
+  behind them and something to do: permission rules for the commands you keep approving, a CLAUDE.md line when it says
+  "it works" without running the tests, lessons for the mistakes it repeats, /clear when the context keeps filling up.
+  Week by week over everything recorded, prompting suggestions from how your own prompts went ("prompts that named a file
+  were corrected half as often"), and lines for each project's CLAUDE.md. Only numbers and yes/no features are kept,
+  never prompts or file contents.
+- **Labels in plain words.** The brain says *Reading, searching* or *Writing, editing*; the anatomical name is still there
+  for those who want it.
+
 ## What it watches for you
 
 Four watchers run all the time and sit in the top-left corner of the brain, so you can see that they are on and how much
@@ -167,6 +186,7 @@ Claude Code running on a remote machine reaches the plugin through a reverse SSH
 | <kbd>S</kbd> <kbd>A</kbd> <kbd>T</kbd> <kbd>G</kbd> <kbd>E</kbd> | Sessions, activity, timeline (click to replay), regions, EEG |
 | <kbd>L</kbd> <kbd>M</kbd> <kbd>V</kbd> | Anatomy layers, MRI slice, look (anatomy or atlas) |
 | <kbd>F</kbd> <kbd>R</kbd> <kbd>H</kbd> <kbd>I</kbd> | Follow activity, reset view, hide everything, numbers and shortcuts |
+| <kbd>W</kbd> <kbd>U</kbd> <kbd>?</kbd> | Watchers, Use Claude Code better, what can I do here |
 
 It adapts to the computer it runs on: it recognises the GPU, measures how long each frame takes and picks a resolution,
 antialiasing and frame rate that keep dragging and zooming smooth (the Info panel, <kbd>I</kbd>, shows what it chose).
@@ -218,7 +238,10 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
   *Install* for the hooks, edits it (a backup is written next to it). Nothing else outside the vault is read or written.
 - **Stored in the plugin's `data.json`:** settings, the activity trace, short labels of what happened in each region
   (file names and program names, never command lines), learned file connections, today's counters and lessons
-  (program names, file names and short sentences, never command lines, paths or secrets).
+  (program names, file names and short sentences, never command lines, paths or secrets), and for *Use Claude Code
+  better* one line of numbers per finished turn (durations, counts, cost, kinds of warnings, the first words of commands
+  you approved, yes/no features of each prompt) for four weeks, then weekly sums for a year. Never prompts, file
+  contents or paths. Off, and *Clear history*, in the settings.
 - **Kept in memory only:** the timeline and, with *Full call details* on (the default), what Claude Code sends about
   each recent call — parameters, output, your prompt, Claude's reply text — so the inspector can show it. It is capped
   (about 24 million characters, oldest dropped first), never written to disk and gone when Obsidian closes. Turn it off
