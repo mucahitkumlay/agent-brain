@@ -345,6 +345,7 @@ function mergeTelemetryEnv(cfg, port) {
 }
 // events that don't mean the session stopped waiting for you
 const PASSIVE = new Set(['Notification', 'Stop', 'StopFailure', 'PermissionRequest', 'Elicitation', 'FileChanged', 'ConfigChange', 'InstructionsLoaded', 'TeammateIdle', 'SessionEnd', 'PostToolBatch']);
+const node_ = (byPath, k) => k.startsWith('n:') ? byPath.get(k.slice(2)) : byPath.get(k);
 function shuffled(arr, k) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; }
@@ -493,6 +494,9 @@ void main() {
 }`;
 // two ways to look at it: the realistic MRI glass, or a clear atlas where the brain is a faint shell and the neurons
 // (notes and files), synapses (links) and signals inside carry the picture
+const PULSE_SEG = 10, PULSE_MAX = 480;   // the lit stretch of an axon behind a signal: pieces per signal, most signals
+// a signal crosses a long axon more slowly than a short one (1 = a link of about 30 mm)
+const pulsePace = (l) => Math.min(2.1, Math.max(0.7, 0.55 + ((l && l.len) || 30) / 66));
 const LOOKS = {
   anatomy: { inner: 1, tract: 0.045, link: 0.05, dend: 0.09, learn: 0.22, node: 1, nodeSize: 1, tint: 0, spike: 1, bloom: 1, ring: 0, bg: 0x030407 },
   atlas: { inner: 0.26, tract: 0.018, link: 0.085, dend: 0.15, learn: 0.4, node: 1.8, nodeSize: 1.3, tint: 0.45, spike: 1.25, bloom: 0.45, ring: 1, bg: 0x0a0b10 },
@@ -1017,6 +1021,7 @@ class BrainView extends ItemView {
     if (this.learnObj) this.learnObj.visible = st.showNotes !== false;
     if (this.dendObj) this.dendObj.visible = st.showNotes !== false;
     if (this.boutonObj) this.boutonObj.visible = st.showNotes !== false;
+    if (this.pulseObj) this.pulseObj.visible = st.showNotes !== false;
     const sliceOn = !!(this.slice && st.sliceOn);
     if (this.slice) {
       if (sliceOn && !this.slice.mesh.parent) this.scene.add(this.slice.mesh);
@@ -1027,7 +1032,7 @@ class BrainView extends ItemView {
     const clip = sliceOn && st.sliceCut !== false;
     if (clip !== this.clipOn) {
       this.clipOn = clip;
-      const mats = (this.clipMats || []).concat([this.nodeObj && this.nodeObj.material, this.spikeObj && this.spikeObj.material, this.linkObj && this.linkObj.material, this.learnObj && this.learnObj.material, this.dendObj && this.dendObj.material, this.boutonObj && this.boutonObj.material].filter(Boolean));
+      const mats = (this.clipMats || []).concat([this.nodeObj && this.nodeObj.material, this.spikeObj && this.spikeObj.material, this.linkObj && this.linkObj.material, this.learnObj && this.learnObj.material, this.dendObj && this.dendObj.material, this.boutonObj && this.boutonObj.material, this.pulseObj && this.pulseObj.material].filter(Boolean));
       // while cut open, everything respects depth so what lies behind the slice stays behind it
       for (const mt of mats) { mt.clippingPlanes = clip ? [this.clipPlane] : null; mt.depthTest = clip; mt.needsUpdate = true; }
       this.brainMat.uniforms.uCutOn.value = clip ? 1 : 0;
@@ -1461,7 +1466,7 @@ class BrainView extends ItemView {
     for (const n of nodes) n.size = n.learned ? 2.2 + Math.min(2.4, n.w * 0.3) : n.hub ? Math.min(3.6 + Math.sqrt(n.deg) * 0.4, 7) : Math.min(2.6 + Math.sqrt(n.deg) * 0.45, 6);
 
     // GPU objects
-    for (const o of [this.nodeObj, this.linkObj, this.spikeObj, this.learnObj, this.dendObj, this.boutonObj]) if (o) { this.scene.remove(o); o.geometry.dispose(); }
+    for (const o of [this.nodeObj, this.linkObj, this.spikeObj, this.learnObj, this.dendObj, this.boutonObj, this.pulseObj]) if (o) { this.scene.remove(o); o.geometry.dispose(); }
     const np = this.makePoints(nodes.length);
     this.nodeGeo = np.g; this.nodeObj = new THREE.Points(np.g, np.mat); this.nodeObj.renderOrder = 3; this.nodeObj.frustumCulled = false;
     this.scene.add(this.nodeObj);
@@ -1552,6 +1557,11 @@ class BrainView extends ItemView {
     this.boutonObj = new THREE.Points(bp.g, bp.mat); this.boutonObj.renderOrder = 3; this.boutonObj.frustumCulled = false;
     this.scene.add(this.boutonObj);
     const sp = this.makePoints(5000);
+    // the impulse itself: the stretch of the axon it is passing through lights up and fades behind it (no beads, no halo)
+    { const pg = new THREE.BufferGeometry(); this.pulsePos = new Float32Array(PULSE_MAX * PULSE_SEG * 6); this.pulseCol = new Float32Array(PULSE_MAX * PULSE_SEG * 6);
+      pg.setAttribute('position', new THREE.BufferAttribute(this.pulsePos, 3)); pg.setAttribute('color', new THREE.BufferAttribute(this.pulseCol, 3)); pg.setDrawRange(0, 0);
+      this.pulseObj = new THREE.LineSegments(pg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+      this.pulseObj.renderOrder = 3; this.pulseObj.frustumCulled = false; this.scene.add(this.pulseObj); }
     this.spikeGeo = sp.g; this.spikeObj = new THREE.Points(sp.g, sp.mat); this.spikeObj.renderOrder = 4; this.spikeObj.frustumCulled = false;
     this.scene.add(this.spikeObj);
 
@@ -1560,8 +1570,8 @@ class BrainView extends ItemView {
     this.nodes = nodes; this.links = links; this.byPath = byPath;
     this.learnedLinks = learnedLinks;
     this.learnedCounts = { neurons: nLearned, synapses: nLearnedSyn };
-    if (this.clipOn) for (const o of [this.linkObj, this.learnObj, this.dendObj, this.boutonObj]) if (o) o.material.clippingPlanes = [this.clipPlane];
-    if (this.plugin.settings.showNotes === false) for (const o of [this.nodeObj, this.linkObj, this.learnObj, this.dendObj, this.boutonObj]) if (o) o.visible = false;
+    if (this.clipOn) for (const o of [this.linkObj, this.learnObj, this.dendObj, this.boutonObj, this.pulseObj]) if (o) o.material.clippingPlanes = [this.clipPlane];
+    if (this.plugin.settings.showNotes === false) for (const o of [this.nodeObj, this.linkObj, this.learnObj, this.dendObj, this.boutonObj, this.pulseObj]) if (o) o.visible = false;
     for (const l of fresh.slice(0, 12)) { this.spark(l, l.a, '#ffcf8a'); this.spark(l, l.b, '#ffcf8a'); }
     this.hover = null; this.pings = [];   // spikes in flight keep travelling on the old curves
     this.needsDraw = true;
@@ -1749,19 +1759,24 @@ class BrainView extends ItemView {
     if (depth === 0) this.pulse(n, hex, 0.75 * Math.min(1, str), 9, 2.2);
     if (depth < 2 && str > 0.3 && n.adj.length) {
       const sh = shex || hex, sc = col3(sh);
-      const pool = from ? n.adj.filter(e => e.n !== from) : n.adj;
-      for (const e of shuffled(pool, depth === 0 ? 4 : 1)) {
+      // the glow follows connections that work has really used (the strongest first), not every link of the note
+      const pool = n.adj.filter(e => e.n !== from && e.l.w > 0.3).sort((p, q) => q.l.w - p.l.w);
+      for (const e of pool.slice(0, depth === 0 ? 3 : 1)) {
         if (this.spikes.length > 480) break;
-        this.spikes.push({ a: n, b: e.n, l: e.l, t: 0, speed: 0.6 + Math.random() * 0.5, hex: sh, c: sc, str: str * 0.55, depth: depth + 1, src: src || this._src || null });
+        this.spikes.push({ a: n, b: e.n, l: e.l, t: 0, speed: 0.85, hex: sh, c: sc, str: str * 0.55, depth: depth + 1, src: src || this._src || null });
       }
     }
   }
 
   // send one spike along a specific link (a learned connection being used)
-  spark(l, from, hex) {
-    if (!l || this.spikes.length > 480) return;
+  // arrive: { hex, str, ping } makes the note it reaches light up on arrival (the signal is what lights it)
+  spark(l, from, hex, arrive, src) {
+    if (!l || this.spikes.length > 480) return null;
     const a = from === l.b ? l.b : l.a, b = a === l.a ? l.b : l.a;
-    this.spikes.push({ a, b, l, t: 0, speed: 0.7, hex, c: col3(hex), str: 0.5, depth: 1 });
+    const dur = Math.min(1.1, Math.max(0.5, 0.45 + (l.len || 30) / 110));   // seconds on screen
+    const sp = { a, b, l, t: 0, speed: pulsePace(l) / dur, hex, c: col3(hex), str: arrive ? arrive.str : 0.25, depth: arrive ? 0 : 1, arrive: arrive || null, src: src || this._src || null };
+    this.spikes.push(sp);
+    return sp;
   }
 
   ping(n, hex) {
@@ -1771,12 +1786,11 @@ class BrainView extends ItemView {
   }
 
   lobeBurst(lobe, hex, amp, count, shex) {
-    const k = this._k == null ? 1 : this._k, src = this._src;
     for (const s of ['L', 'R']) {
       const r = this.regions[lobe + s];
       if (r) this.pulse(r.surf || r, hex, Math.min(lobe === 'thalamus' ? 0.25 : 0.5, amp * 0.6), lobe === 'thalamus' ? 8 : 15, 2.6);
     }
-    shuffled(this.nodes.filter(n => n.lobe === lobe && !n.learned), count).forEach((n, i) => window.setTimeout(() => this.fire(n, hex, amp * k, 1, null, shex, src), i * 70));
+    // no random notes: a note lights up only when Claude touched it (or a signal reached it)
   }
 
   attend(lobe, amt) {
@@ -1801,9 +1815,15 @@ class BrainView extends ItemView {
     if (!L) return out;
     const node = L.key.startsWith('n:') ? this.byPath.get(L.key.slice(2)) : this.byPath.get(L.key);
     if (node && node.learned) out.push(node);
+    this._held = null;
     if (learnt && learnt.syn) {
       const l = this.learnedLinks && this.learnedLinks.get(learnt.syn.a + '|' + learnt.syn.b);
-      if (l) window.setTimeout(() => this.spark(l, node, sc), 120);
+      // the trail: the signal runs from the file used before to this one, along the connection between them, and lights this one when it arrives
+      const prevKey = learnt.syn.a === learnt.key ? learnt.syn.b : learnt.syn.a, prev = node_(this.byPath, prevKey);
+      if (l && node && prev && prev !== node && (l.a === prev || l.b === prev)) {
+        const k = this._k == null ? 1 : this._k;
+        if (this.spark(l, prev, sc, { hex: this._trailHex || sc, str: 1.1 * k, ping: k === 1 }, this._src)) this._held = node;
+      }
       this.innerAct('Hippocampus', '#c9b8ff', learnt.syn.isNew ? 0.9 : 0.5);
     }
     return out;
@@ -1824,7 +1844,9 @@ class BrainView extends ItemView {
       case 'SubagentStart': relay(0.35); this.attend('parietal', 0.5); this.signalNear('agent', this.regions.parietalR || THALAMUS, sc, 0.8 * k); break;
       case 'PreToolUse': {
         const hex = catColor(cat);
-        const targets = this.resolveTargets(ev).slice(0, 3).concat(this.learnedTargets(ev, s, learnt, sc));
+        this._trailHex = hex;
+        const found = this.resolveTargets(ev).slice(0, 3).concat(this.learnedTargets(ev, s, learnt, sc)), held = this._held; this._held = null;
+        const targets = found.filter(n => n !== held);
         { const src = this._src; targets.forEach((n, i) => window.setTimeout(() => { this.fire(n, hex, 0.9 * k, 0, null, sc, src); if (k === 1) this.ping(n, sc); }, i * 90)); }
         strikes.forEach((st, i) => this.strike(st, sc, 0.75 * k, i * 110, { amp: 0.5 }));
         if (!strikes.length) this.lobeBurst(lobe, hex, 0.45, 2, sc);
@@ -1860,7 +1882,7 @@ class BrainView extends ItemView {
         const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : '';
         inDir = this.nodes.filter(n => !n.learned && n.path.startsWith(parent) && !n.path.slice(parent.length).includes('/'));
       }
-      out.push(...shuffled(inDir, 5));
+      out.push(...inDir.sort((a, b) => strHash(a.path) - strHash(b.path)).slice(0, 5));   // the same five every time
     }
     return out;
   }
@@ -1906,12 +1928,14 @@ class BrainView extends ItemView {
         this.innerAct('Thalamus', '#dfe8ff', 0.6);
         this.relaySignal(sc, 4);
         if (e === 'UserPromptExpansion') this.innerAct('Caudate nucleus', sc, 0.6);     // a stored procedure: the striatum
-        { const src = this._src; shuffled(this.hubs(), 3).forEach((n, i) => window.setTimeout(() => this.fire(n, SIGNAL, 0.5 * k, 1, null, sc, src), 150 + i * 60)); }
+        { const src = this._src; this.hubs().slice().sort((a, b) => b.deg - a.deg).slice(0, 3).forEach((n, i) => window.setTimeout(() => this.fire(n, SIGNAL, 0.5 * k, 1, null, sc, src), 150 + i * 60)); }
         this.attend('frontal', 0.6);
         break;
       case 'PreToolUse': {
         const hex = catColor(cat);
-        const targets = this.resolveTargets(ev).concat(this.learnedTargets(ev, s, learnt, sc));
+        this._trailHex = hex;
+        const found = this.resolveTargets(ev).concat(this.learnedTargets(ev, s, learnt, sc)), held = this._held; this._held = null;
+        const targets = found.filter(n => n !== held);   // the one a signal is on its way to lights up when the signal arrives
         { const src = this._src; targets.forEach((n, i) => window.setTimeout(() => { this.fire(n, hex, 1.15 * k, 0, null, sc, src); if (k === 1) this.ping(n, sc); }, i * 90)); }
         // the thalamus dispatches, then every command of the call travels to where that kind of work happens
         this.pulse(THALAMUS, sc, 0.14 * k, 7, 1.2);
@@ -2281,7 +2305,7 @@ class BrainView extends ItemView {
     let tag = '', what = '', where = '', color = src.color || (s && s.color) || SIGNAL;
     if (h.kind === 'note') {
       tag = 'NOTE'; what = `${sp.a.name} → ${sp.b.name}`;
-      where = r ? `set off by ${r.text || r.e}` : 'spreading through your notes';
+      where = sp.arrive ? 'the next file in the order Claude used them' : r ? `set off by ${r.text || r.e}` : 'along a connection that was used before';
     } else if (src.type === 'think') { tag = 'THINKING'; what = 'prefrontal loop'; where = 'the model is deliberating'; }
     else if (src.type === 'body') { tag = 'BODY'; what = { cpu: 'CPU load', net: 'network traffic', disk: 'disk traffic' }[src.what] || 'system'; where = src.machine === 'local' ? 'this computer' : src.machine || ''; color = VITAL; }
     else if (src.type === 'compact') { tag = 'MEMORY'; what = 'compacting context'; where = 'hippocampal replay'; }
@@ -3575,7 +3599,10 @@ class BrainView extends ItemView {
     if (!dt) return;
     for (const n of this.nodes) { if (n.act > 0) n.act = Math.max(0, n.act - dt * 0.6); if (n.labelT > 0) n.labelT -= dt; }
     const cur = this.spikes; this.spikes = [];
-    for (const s of cur) { s.t += dt * s.speed; if (s.t >= 1) this.fire(s.b, s.hex, s.str, s.depth, s.a, undefined, s.src); else this.spikes.push(s); }
+    for (const s of cur) { s.t += dt * s.speed / pulsePace(s.l); if (s.t >= 1) {
+        if (s.arrive) { this.fire(s.b, s.arrive.hex, s.str, 0, s.a, s.hex, s.src); if (s.arrive.ping) this.ping(s.b, s.hex); }
+        else this.fire(s.b, s.hex, s.str, s.depth, s.a, undefined, s.src);
+      } else this.spikes.push(s); }
     this.pulses = this.pulses.filter(p => (p.t += dt) < p.life);
     this.waves = this.waves.filter(w => (w.r += dt * 95) < 170);
     this.pings = this.pings.filter(p => (p.t += dt) < 1.2);
@@ -3998,20 +4025,35 @@ class BrainView extends ItemView {
     const sg = this.spikeGeo;
     if (sg) {
       const pos = sg.attributes.position.array, colA = sg.attributes.aColor.array, size = sg.attributes.aSize.array, glow = sg.attributes.aGlow.array;
-      let k = 0;
-      const TR = 6;
+      let k = 0, pv = 0;
+      const pp = this.pulsePos, pc = this.pulseCol, lp = this._lp || (this._lp = { x: 0, y: 0, z: 0 }), lq = this._lq || (this._lq = { x: 0, y: 0, z: 0 });
       for (const s of this.plugin.settings.showNotes === false ? [] : this.spikes) {
-        if (k + TR > 2400) break;
-        const l = s.l, fwd = l.a === s.a, lp = this._lp || (this._lp = { x: 0, y: 0, z: 0 });
-        for (let j = 0; j < TR; j++) {
-          const t = Math.max(0, s.t - j * 0.035), f = 1 - j / TR;
-          linkPoint(l.pts, fwd ? t : 1 - t, lp);
-          pos[k * 3] = lp.x; pos[k * 3 + 1] = lp.y; pos[k * 3 + 2] = lp.z;
-          colA[k * 3] = s.c.r * f * LK.spike; colA[k * 3 + 1] = s.c.g * f * LK.spike; colA[k * 3 + 2] = s.c.b * f * LK.spike;
-          size[k] = (j === 0 ? 3.2 : 2.4) * f; glow[k] = j === 0 ? 0.55 : 0.2 * f;
-          k++;
+        if (k + 1 > 2400) break;
+        const l = s.l, fwd = l.a === s.a, K = LK.spike * 0.9, tl = Math.min(0.5, Math.max(0.05, 9 / Math.max(10, l.len || 30)));
+        // the lit stretch: PULSE_SEG pieces from the head back along the path, fading
+        if (pv < PULSE_MAX * PULSE_SEG) {
+          let prevOk = false;
+          for (let j = 0; j <= PULSE_SEG; j++) {
+            const t = s.t - tl * j / PULSE_SEG, b = Math.pow(1 - j / PULSE_SEG, 1.7);
+            if (t < 0) break;
+            linkPoint(l.pts, fwd ? t : 1 - t, j === 0 ? lp : lq);
+            if (j > 0) {
+              const o = pv * 6, f0 = Math.pow(1 - (j - 1) / PULSE_SEG, 1.7), f1 = b;
+              pp[o] = lp.x; pp[o + 1] = lp.y; pp[o + 2] = lp.z; pp[o + 3] = lq.x; pp[o + 4] = lq.y; pp[o + 5] = lq.z;
+              pc[o] = s.c.r * f0 * K; pc[o + 1] = s.c.g * f0 * K; pc[o + 2] = s.c.b * f0 * K; pc[o + 3] = s.c.r * f1 * K; pc[o + 4] = s.c.g * f1 * K; pc[o + 5] = s.c.b * f1 * K;
+              pv++; lp.x = lq.x; lp.y = lq.y; lp.z = lq.z;
+              if (pv >= PULSE_MAX * PULSE_SEG) break;
+            }
+          }
         }
+        // the head: one small bright point at the tip
+        linkPoint(l.pts, fwd ? s.t : 1 - s.t, lp);
+        pos[k * 3] = lp.x; pos[k * 3 + 1] = lp.y; pos[k * 3 + 2] = lp.z;
+        colA[k * 3] = s.c.r * LK.spike * 0.8; colA[k * 3 + 1] = s.c.g * LK.spike * 0.8; colA[k * 3 + 2] = s.c.b * LK.spike * 0.8;
+        size[k] = 1.7; glow[k] = 0.3;
+        k++;
       }
+      { const pg = this.pulseObj.geometry; pg.setDrawRange(0, pv * 2); pg.attributes.position.needsUpdate = true; pg.attributes.color.needsUpdate = true; }
       // signals running along real fibre tracts
       const tp = this._tp || (this._tp = { x: 0, y: 0, z: 0 });
       for (const sp of this.tractSpikes || []) {
@@ -4020,7 +4062,7 @@ class BrainView extends ItemView {
           this.tractPoint(sp.l, sp.fwd ? tt : 1 - tt, tp);
           pos[k * 3] = tp.x; pos[k * 3 + 1] = tp.y; pos[k * 3 + 2] = tp.z;
           colA[k * 3] = sp.c.r * f * LK.spike; colA[k * 3 + 1] = sp.c.g * f * LK.spike; colA[k * 3 + 2] = sp.c.b * f * LK.spike;
-          size[k] = (j === 0 ? 4.4 : 2.8) * (0.5 + 0.5 * f); glow[k] = j === 0 ? 0.75 : 0.25 * f;
+          size[k] = (j === 0 ? 2.2 : 1.7) * (0.5 + 0.5 * f); glow[k] = j === 0 ? 0.35 : 0.15 * f;
           k++;
         }
       }
@@ -4031,7 +4073,7 @@ class BrainView extends ItemView {
         a.needsUpdate = true;
       }
       this.spikeObj.material.uniforms.uScale.value = this.nodeObj ? this.nodeObj.material.uniforms.uScale.value : 300;
-      this.spikeObj.material.uniforms.uRing.value = LK.ring * 0.5;
+      this.spikeObj.material.uniforms.uRing.value = 0;
       this.spikeObj.material.uniforms.uMaxPx.value = 36 * this.renderer.getPixelRatio();
     }
     {

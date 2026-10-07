@@ -10,7 +10,7 @@
 // Every path gets the small, smooth wobble of a living fibre, and a few twigs near each end (the terminal arbour).
 // Everything depends only on the two ends and a seed, so a link always looks the same.
 
-const N_SEG = 14;                       // segments per link: N_SEG + 1 points, evenly spaced along the path
+const N_SEG = 26;                       // segments per link: N_SEG + 1 points, evenly spaced along the path
 export const LINK_SEGMENTS = N_SEG;
 const U_MAX = 34;                       // mm: links shorter than this are association fibres
 const TRACT_REACH = 38;                 // mm: how far a neuron may be from the end of a fibre it uses

@@ -92,7 +92,7 @@ no tokens.
 
 - **EEG traces** per region, **sleep replay** of the last hours when everything is idle, **body signals** (CPU, memory,
   network, disk of each machine on the brain stem), your **vault as neurons** with links as synapses and connections
-  learned from the files Claude uses together, a **daily note** with what each session did and, if you like, a **note
+  learned from the files Claude uses together (a signal runs from one file to the next in the order Claude used them), a **daily note** with what each session did and, if you like, a **note
   per session** that links to the notes it worked with.
 
 - **Neurons you can believe.** Every note grows dendrites; every link is an axon that follows the folds of the cortex or a

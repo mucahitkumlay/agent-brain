@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.14.0
+- Signals go where the work went, and nowhere at random. When Claude uses a file right after another one, a signal now runs
+  from the first to the second along the connection between them, and the second note lights up when the signal arrives.
+  The glow of a note spreads only along connections that have really been used (the strongest first), no longer along any
+  link of the note. Work that touches no note (a shell command, a web search) pulses its region and its pathway, and no
+  longer lights random notes in that region. A folder search lights the same five notes every time. The "most connected"
+  notes light when you send a prompt, instead of three at random. Only the decorative ambient flicker (off by default,
+  and labelled as not real) is still random.
+- A signal looks like a nerve impulse: a small bright head, and the stretch of axon it is passing through lights up and
+  fades behind it. No more halo ring and no beads of light. Long axons take longer to cross than short ones.
+- Axons are smoother (26 pieces per link instead of 14).
+- The signal inspector says what a signal is: the next file in the order Claude used them, or a connection used before.
+
 ## 0.13.0
 - Fixed: neurons and synapses stuck out of the brain. Some cell bodies sat on the wrong side of a thin fold, and their
   dendrites, axons and terminal twigs left the cortex with them. Now every cell body is placed under the surface, and
