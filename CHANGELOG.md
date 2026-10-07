@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.12.0
+- Neurons and synapses look like the real thing. Every note is a cell with its own dendrites (one apical dendrite towards
+  the cortex, several basal ones, each branching), tinted by its region. A link is an axon that leaves the cell body and
+  runs the way real fibres do: short links as association fibres that dip under the cortex and follow its folds, long
+  links through a real white-matter bundle from the anatomy data, otherwise a free curve that bends its own way. Each
+  axon wobbles a little, thins along its length and ends in a few twigs with small swellings (boutons) at the receiving
+  neuron. Signals travel along the same paths. Nothing is random between sessions: a link always runs the same way.
+- New: **Reduce motion** (Settings; *Auto* follows your system). No auto-rotate, no following camera, no dreaming and no
+  decorative flicker; real events still light up and travel because they are the data.
+- New: step through travelling signals from the keyboard (<kbd>[</kbd> <kbd>]</kbd> or <kbd>P</kbd> <kbd>N</kbd>, which
+  freeze time; <kbd>Enter</kbd> opens one). Works with AltGr layouts. The signal is described in words through a live region.
+- New: **a note per session** (off by default): when Claude Code reports a session ended it gets its own note under
+  `Sessions/`, with what it did that day, its cost, and `[[links]]` to the notes it worked with and back to the day. A
+  session that is killed sends nothing; a command saves any session's note on demand. Your "My notes" part is kept.
+  Notes are written one at a time and read through one helper only.
+- New: **spending limits** per session and per day (off by default): one notice when a limit is passed. Never a stop.
+- New: **export a replay as one web page**: the same scrubbed data as a replay file, as a single HTML file anyone can open
+  in a browser (timeline by kind of work, play and scrub). It loads nothing, makes no requests and carries a policy that
+  forbids everything but its own script.
+- Fix: the daily note no longer grows at every refresh (it found the words "## My notes" in its own callout and copied the
+  whole note below them). Text from outside (project folder, working directory, file names) is written as one plain line, so
+  it cannot start a heading, callout, link or table cell.
+- CI: a gitleaks secret scan (pinned) over the whole history on every push and pull request. Test fixtures that look like
+  keys, including private-key headers, are built at run time.
+
 ## 0.11.1
 - Fix: "Tests pass" is no longer claimed from a message that says the tests fail ("Tüm testler başarısız oldu" was
   read as a claim and accused as "ran no tests"). Claims now ignore failure reports, conditions and instructions

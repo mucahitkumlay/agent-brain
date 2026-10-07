@@ -12,7 +12,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { INSTALL_SH } from './scripts.js';
 import { REPO, ASSET_RELEASE, ASSETS } from './generated.js';
 import { bashCategory, bashParts, psCategory, mcpCategory, shellTargets } from './intent.js';
-import { riskyCommand, riskyScript, findSecrets, maskSecrets, UNTRUSTED_TOOLS, sensitivePath, egressCommand, secretDump, persistence, injectionText, lessonFor, agentToHook, scrubReplay, programOf, claimsOf, costCompare, muteKey, TEST_CMD, TESTS_ONLY, THEMES } from './insight.js';
+import { riskyCommand, riskyScript, findSecrets, maskSecrets, UNTRUSTED_TOOLS, sensitivePath, egressCommand, secretDump, persistence, injectionText, lessonFor, agentToHook, scrubReplay, programOf, claimsOf, costCompare, muteKey, budgetHits, noteName, mdText, replayHtml, TEST_CMD, TESTS_ONLY, THEMES } from './insight.js';
+import { makeSurfaceIndex, makeEndIndex, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from './fibre.js';
 import { AAL, AAL_LOBE, GYRI, aalName, bundleName, parseAal, parseInner, parseT1, parseTracts, makeInner, makeTracts, makeSlice } from './anatomy.js';
 
 const obsidian = require('obsidian');
@@ -31,6 +32,7 @@ const DEFAULTS = {
   traceMinutes: 90, vitals: true, showVitals: true,
   telemetry: true, notifyStuck: true, dream: true, showEeg: true, callDetails: true, look: 'anatomy', realityCheck: true, notifyReality: true,
   guard: true, shield: true, notifyGuard: true, evidence: true, lessons: true, theme: 'night', coach: false, setupSeen: false,
+  reduceMotion: 'auto', budgetSession: 0, budgetDay: 0, sessionNote: false,
 };
 // "who": one color per session. Chosen to stay apart from the lobe colors ("what").
 const SESSION_COLORS = ['#7fe0c2', '#c3a6ff', '#7cc4ff', '#f59ac0', '#b6e388', '#dfe6f2'];
@@ -492,8 +494,8 @@ void main() {
 // two ways to look at it: the realistic MRI glass, or a clear atlas where the brain is a faint shell and the neurons
 // (notes and files), synapses (links) and signals inside carry the picture
 const LOOKS = {
-  anatomy: { inner: 1, tract: 0.045, link: 0.04, learn: 0.22, node: 1, nodeSize: 1, tint: 0, spike: 1, bloom: 1, ring: 0, bg: 0x030407 },
-  atlas: { inner: 0.26, tract: 0.018, link: 0.065, learn: 0.4, node: 1.8, nodeSize: 1.3, tint: 0.45, spike: 1.25, bloom: 0.45, ring: 1, bg: 0x0a0b10 },
+  anatomy: { inner: 1, tract: 0.045, link: 0.05, dend: 0.09, learn: 0.22, node: 1, nodeSize: 1, tint: 0, spike: 1, bloom: 1, ring: 0, bg: 0x030407 },
+  atlas: { inner: 0.26, tract: 0.018, link: 0.085, dend: 0.15, learn: 0.4, node: 1.8, nodeSize: 1.3, tint: 0.45, spike: 1.25, bloom: 0.45, ring: 1, bg: 0x0a0b10 },
 };
 
 /* ================================================================ view */
@@ -592,7 +594,7 @@ class BrainView extends ItemView {
     this.kpiEl = this.infoEl.createDiv({ cls: 'cb-kpis' });
     this.srcEl = this.infoEl.createDiv({ cls: 'cb-srcs' });
     const keys = this.infoEl.createDiv({ cls: 'cb-keys' });
-    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy or atlas'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
+    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy or atlas'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], ['[ ] or P N', 'Previous / next signal'], ['Enter', 'Open the selected signal'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
       const r = keys.createDiv({ cls: 'cb-key-row' });
       r.createEl('kbd', { text: k }); r.createSpan({ text: d });
     }
@@ -1013,6 +1015,8 @@ class BrainView extends ItemView {
     if (this.nodeObj) this.nodeObj.visible = st.showNotes !== false;
     if (this.linkObj) this.linkObj.visible = st.showNotes !== false;
     if (this.learnObj) this.learnObj.visible = st.showNotes !== false;
+    if (this.dendObj) this.dendObj.visible = st.showNotes !== false;
+    if (this.boutonObj) this.boutonObj.visible = st.showNotes !== false;
     const sliceOn = !!(this.slice && st.sliceOn);
     if (this.slice) {
       if (sliceOn && !this.slice.mesh.parent) this.scene.add(this.slice.mesh);
@@ -1023,7 +1027,7 @@ class BrainView extends ItemView {
     const clip = sliceOn && st.sliceCut !== false;
     if (clip !== this.clipOn) {
       this.clipOn = clip;
-      const mats = (this.clipMats || []).concat([this.nodeObj && this.nodeObj.material, this.spikeObj && this.spikeObj.material, this.linkObj && this.linkObj.material, this.learnObj && this.learnObj.material].filter(Boolean));
+      const mats = (this.clipMats || []).concat([this.nodeObj && this.nodeObj.material, this.spikeObj && this.spikeObj.material, this.linkObj && this.linkObj.material, this.learnObj && this.learnObj.material, this.dendObj && this.dendObj.material, this.boutonObj && this.boutonObj.material].filter(Boolean));
       // while cut open, everything respects depth so what lies behind the slice stays behind it
       for (const mt of mats) { mt.clippingPlanes = clip ? [this.clipPlane] : null; mt.depthTest = clip; mt.needsUpdate = true; }
       this.brainMat.uniforms.uCutOn.value = clip ? 1 : 0;
@@ -1298,6 +1302,28 @@ class BrainView extends ItemView {
     return h + ':' + files.length + ':' + n;
   }
 
+  // where every link runs: along the folds under the cortex, through a real fibre bundle, or as a free curve (see fibre.js).
+  // A link keeps its route until one of its two neurons moves or the fibre data arrives.
+  routeLinks(links) {
+    const P = this.mesh.pos, Nn = this.vNormal, G = this.plugin.geo, T = this.tractLines || [];
+    if (!this._route || this._route.mesh !== this.mesh) this._route = { mesh: this.mesh, surface: makeSurfaceIndex(P, Nn), cache: new Map(), ends: null, endIdx: null };
+    const R = this._route;
+    if (G && G.nTracts && T.length === G.nTracts && R.ends !== G.ends) { R.ends = G.ends; R.endIdx = makeEndIndex(G.ends); R.cache.clear(); }
+    const real = R.endIdx ? 't' : '-', centre = { x: 0, y: -4, z: 2 };
+    if (R.cache.size > 60000) R.cache.clear();
+    for (const l of links) {
+      const key = l.a.path + '>' + l.b.path, r2 = (v) => Math.round(v * 10);
+      const sig = real + r2(l.a.x) + ',' + r2(l.a.y) + ',' + r2(l.a.z) + ',' + r2(l.b.x) + ',' + r2(l.b.y) + ',' + r2(l.b.z);
+      let r = R.cache.get(key);
+      if (!r || r.sig !== sig) {
+        const seed = strHash(key);
+        r = routeLink(l.a, l.b, { seed, surface: R.surface, endIdx: R.endIdx, ends: R.ends, tracts: T, centre });
+        r.tw = twigs(r.pts, seed); r.sig = sig; R.cache.set(key, r);
+      }
+      l.pts = r.pts; l.len = r.len; l.kind = r.kind; l.tw = r.tw;
+    }
+  }
+
   async buildGraph() {
     if (!this.scene) return;
     this.graphSig = this.graphSignature();
@@ -1348,7 +1374,7 @@ class BrainView extends ItemView {
         const ctr = centers[i % centers.length];
         const hh = strHash(f.path);
         const r1 = (hh & 0xffff) / 0xffff, r2 = ((hh >>> 16) & 0xffff) / 0xffff;
-        let x, y, z;
+        let x, y, z, nx0 = 0, ny0 = 0, nz0 = 0;
         if (!ctr.pool) {
           const base = ctr.reg || (lobe === 'stem' ? STEM : THALAMUS);
           const u = r1 * 2 - 1, a = r2 * Math.PI * 2, rr = Math.sqrt(1 - u * u), s = lobe === 'stem' ? 7 : 6;
@@ -1357,9 +1383,10 @@ class BrainView extends ItemView {
           const vi = ctr.pool[Math.floor(r1 * ctr.pool.length)];
           const depth = 2.5 + r2 * 4; // just beneath the cortex (mm)
           x = P[vi * 3] - Nn[vi * 3] * depth; y = P[vi * 3 + 1] - Nn[vi * 3 + 1] * depth; z = P[vi * 3 + 2] - Nn[vi * 3 + 2] * depth;
+          nx0 = Nn[vi * 3]; ny0 = Nn[vi * 3 + 1]; nz0 = Nn[vi * 3 + 2];
         }
         const prev = old.get(f.path);
-        const n = { path: f.path, name: f.basename, lobe, x, y, z, deg: 0, adj: [], act: prev ? prev.act : 0, actColor: col3(SIGNAL), labelT: 0, hub: lobe === 'thalamus', sx: 0, sy: 0, vis: true };
+        const n = { path: f.path, name: f.basename, lobe, x, y, z, nx: nx0, ny: ny0, nz: nz0, deg: 0, adj: [], act: prev ? prev.act : 0, actColor: col3(SIGNAL), labelT: 0, hub: lobe === 'thalamus', sx: 0, sy: 0, vis: true };
         nodes.push(n); byPath.set(f.path, n);
       });
     }
@@ -1387,7 +1414,7 @@ class BrainView extends ItemView {
       const prev = old.get(key);
       const w = this.plugin.decayW(nn, tnow);
       const n = { path: key, name: nn.name, lobe, learned: true, file: nn.path, proj: nn.proj, w, uses: nn.n,
-        x: P[vi * 3] - Nn[vi * 3] * depth, y: P[vi * 3 + 1] - Nn[vi * 3 + 1] * depth, z: P[vi * 3 + 2] - Nn[vi * 3 + 2] * depth,
+        x: P[vi * 3] - Nn[vi * 3] * depth, y: P[vi * 3 + 1] - Nn[vi * 3 + 1] * depth, z: P[vi * 3 + 2] - Nn[vi * 3 + 2] * depth, nx: Nn[vi * 3], ny: Nn[vi * 3 + 1], nz: Nn[vi * 3 + 2],
         deg: 0, adj: [], act: prev ? prev.act : 0, actColor: col3(SIGNAL), labelT: 0, hub: false, sx: 0, sy: 0, vis: true, firedAt: prev ? prev.firedAt : 0 };
       nodes.push(n); byPath.set(key, n); nLearned++;
     }
@@ -1428,58 +1455,96 @@ class BrainView extends ItemView {
     for (const n of nodes) n.size = n.learned ? 2.2 + Math.min(2.4, n.w * 0.3) : n.hub ? Math.min(3.6 + Math.sqrt(n.deg) * 0.4, 7) : Math.min(2.6 + Math.sqrt(n.deg) * 0.45, 6);
 
     // GPU objects
-    for (const o of [this.nodeObj, this.linkObj, this.spikeObj, this.learnObj]) if (o) { this.scene.remove(o); o.geometry.dispose(); }
+    for (const o of [this.nodeObj, this.linkObj, this.spikeObj, this.learnObj, this.dendObj, this.boutonObj]) if (o) { this.scene.remove(o); o.geometry.dispose(); }
     const np = this.makePoints(nodes.length);
     this.nodeGeo = np.g; this.nodeObj = new THREE.Points(np.g, np.mat); this.nodeObj.renderOrder = 3; this.nodeObj.frustumCulled = false;
     this.scene.add(this.nodeObj);
-    const SEG = 10;
+    const SEG = LINK_SEGMENTS;
     const vlinks = links.filter(l => !l.learned), llinks = links.filter(l => l.learned);
-    const lp = new Float32Array(vlinks.length * SEG * 2 * 3);
-    const lc = new Float32Array(vlinks.length * SEG * 2 * 3);
+    this.routeLinks(links);
     // fibres converge on the hub notes in the middle; fade them there so the centre doesn't flare
     const fade = (x, y, z) => {
       const d = Math.min(Math.hypot(x - THALAMUS.x, y - THALAMUS.y, z - THALAMUS.z), Math.hypot(x + THALAMUS.x, y - THALAMUS.y, z - THALAMUS.z));
       return 0.12 + 0.88 * Math.min(1, Math.max(0, (d - 8) / 40));
     };
-    let o = 0;
-    for (const l of vlinks) {
-      let px = l.a.x, py = l.a.y, pz = l.a.z;
-      for (let s = 1; s <= SEG; s++) {
-        const t = s / SEG, u = 1 - t;
-        const x = u * u * l.a.x + 2 * u * t * l.c.x + t * t * l.b.x, y = u * u * l.a.y + 2 * u * t * l.c.y + t * t * l.b.y, z = u * u * l.a.z + 2 * u * t * l.c.z + t * t * l.b.z;
-        const f0 = fade(px, py, pz), f1 = fade(x, y, z);
-        lc[o] = lc[o + 1] = lc[o + 2] = f0; lc[o + 3] = lc[o + 4] = lc[o + 5] = f1;
-        lp[o++] = px; lp[o++] = py; lp[o++] = pz; lp[o++] = x; lp[o++] = y; lp[o++] = z;
-        px = x; py = y; pz = z;
+    // an axon is strongest where it leaves the cell body, thins along its way, and brightens again where it ends
+    const taper = (t) => 0.5 + 0.5 * Math.exp(-t * 5) + 0.25 * Math.exp(-(1 - t) * 8);
+    // one set of lines for a group of links: the axon (SEG pieces) and the twigs of its terminal arbour
+    const lines = (group, weight) => {
+      let nseg = 0; for (const l of group) nseg += SEG + (l.tw ? l.tw.seg.length / 6 : 0);
+      const pos = new Float32Array(Math.max(1, nseg) * 6), col = new Float32Array(pos.length);
+      let q = 0;
+      for (const l of group) {
+        const Pp = l.pts, w = weight ? weight(l) : 1;
+        for (let sg = 0; sg < SEG; sg++) {
+          const x0 = Pp[sg * 3], y0 = Pp[sg * 3 + 1], z0 = Pp[sg * 3 + 2], x1 = Pp[sg * 3 + 3], y1 = Pp[sg * 3 + 4], z1 = Pp[sg * 3 + 5];
+          const k0 = w * taper(sg / SEG) * fade(x0, y0, z0), k1 = w * taper((sg + 1) / SEG) * fade(x1, y1, z1);
+          col[q] = col[q + 1] = col[q + 2] = k0; col[q + 3] = col[q + 4] = col[q + 5] = k1;
+          pos[q++] = x0; pos[q++] = y0; pos[q++] = z0; pos[q++] = x1; pos[q++] = y1; pos[q++] = z1;
+        }
+        if (l.tw) for (let k = 0; k < l.tw.seg.length; k += 6) {
+          const f0 = w * 0.8 * fade(l.tw.seg[k], l.tw.seg[k + 1], l.tw.seg[k + 2]), f1 = w * 0.8 * fade(l.tw.seg[k + 3], l.tw.seg[k + 4], l.tw.seg[k + 5]);
+          col[q] = col[q + 1] = col[q + 2] = f0; col[q + 3] = col[q + 4] = col[q + 5] = f1;
+          for (let m = 0; m < 6; m++) pos[q++] = l.tw.seg[k + m];
+        }
       }
-    }
+      return { pos, col, nseg };
+    };
+    const V = lines(vlinks);
     this.linkGeo = new THREE.BufferGeometry();
-    this.linkGeo.setAttribute('position', new THREE.BufferAttribute(lp, 3));
-    this.linkGeo.setAttribute('color', new THREE.BufferAttribute(lc, 3));
-    this.linkObj = new THREE.LineSegments(this.linkGeo, new THREE.LineBasicMaterial({ color: 0x8aa2d6, vertexColors: true, transparent: true, opacity: 0.04, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.linkGeo.setAttribute('position', new THREE.BufferAttribute(V.pos, 3));
+    this.linkGeo.setAttribute('color', new THREE.BufferAttribute(V.col, 3));
+    this.linkGeo.setDrawRange(0, V.nseg * 2);
+    this.linkObj = new THREE.LineSegments(this.linkGeo, new THREE.LineBasicMaterial({ color: 0x8aa2d6, vertexColors: true, transparent: true, opacity: 0.05, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
     this.linkObj.renderOrder = 2; this.linkObj.frustumCulled = false;
     this.scene.add(this.linkObj);
     // learned fibres in a warm tone, brighter the stronger they are
-    const qp = new Float32Array(Math.max(1, llinks.length) * SEG * 2 * 3), qc = new Float32Array(qp.length);
-    o = 0;
-    for (const l of llinks) {
-      const k = 0.25 + 0.75 * Math.min(1, l.w / 6);
-      let px = l.a.x, py = l.a.y, pz = l.a.z;
-      for (let sg = 1; sg <= SEG; sg++) {
-        const t = sg / SEG, u = 1 - t;
-        const x = u * u * l.a.x + 2 * u * t * l.c.x + t * t * l.b.x, y = u * u * l.a.y + 2 * u * t * l.c.y + t * t * l.b.y, z = u * u * l.a.z + 2 * u * t * l.c.z + t * t * l.b.z;
-        for (let j = 0; j < 6; j++) qc[o + j] = k;
-        qp[o++] = px; qp[o++] = py; qp[o++] = pz; qp[o++] = x; qp[o++] = y; qp[o++] = z;
-        px = x; py = y; pz = z;
-      }
-    }
+    const Q = lines(llinks, (l) => 0.25 + 0.75 * Math.min(1, l.w / 6));
     const lg = new THREE.BufferGeometry();
-    lg.setAttribute('position', new THREE.BufferAttribute(qp, 3));
-    lg.setAttribute('color', new THREE.BufferAttribute(qc, 3));
-    lg.setDrawRange(0, llinks.length * SEG * 2);
+    lg.setAttribute('position', new THREE.BufferAttribute(Q.pos, 3));
+    lg.setAttribute('color', new THREE.BufferAttribute(Q.col, 3));
+    lg.setDrawRange(0, Q.nseg * 2);
     this.learnObj = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xffbf73, vertexColors: true, transparent: true, opacity: 0.22, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
     this.learnObj.renderOrder = 2; this.learnObj.frustumCulled = false;
     this.scene.add(this.learnObj);
+    // dendrites: every neuron grows its own tree, tinted by its region, bright at the cell body and fading outwards
+    const budget = Math.max(10, Math.min(100, Math.floor(150000 / Math.max(1, nodes.length))));
+    const trees = nodes.map(n => dendrites(n, strHash(n.path), n.learned ? Math.min(budget, 26) : n.hub ? Math.min(budget, 40) : budget, Math.max(0.7, Math.min(1.5, n.size / 3.4))));
+    let dn = 0; for (const t of trees) dn += t.inten.length;
+    const dpos = new Float32Array(Math.max(1, dn) * 3), dcol = new Float32Array(dpos.length);
+    let dq = 0;
+    trees.forEach((t, ni) => {
+      const tc = this.lobeTint(nodes[ni].lobe), cr = tc.r * 0.55 + 0.45, cg = tc.g * 0.55 + 0.45, cb = tc.b * 0.55 + 0.45;
+      for (let v = 0; v < t.inten.length; v++) {
+        const x = t.pos[v * 3], y = t.pos[v * 3 + 1], z = t.pos[v * 3 + 2], k = t.inten[v] * fade(x, y, z);
+        dpos[dq] = x; dpos[dq + 1] = y; dpos[dq + 2] = z; dcol[dq] = cr * k; dcol[dq + 1] = cg * k; dcol[dq + 2] = cb * k; dq += 3;
+      }
+    });
+    const dg = new THREE.BufferGeometry();
+    dg.setAttribute('position', new THREE.BufferAttribute(dpos, 3));
+    dg.setAttribute('color', new THREE.BufferAttribute(dcol, 3));
+    dg.setDrawRange(0, dn);
+    this.dendObj = new THREE.LineSegments(dg, new THREE.LineBasicMaterial({ color: 0xffffff, vertexColors: true, transparent: true, opacity: 0.09, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.dendObj.renderOrder = 2; this.dendObj.frustumCulled = false;
+    this.scene.add(this.dendObj);
+    // boutons: the small swellings at the tips of each axon's terminal twigs, where it meets the next neuron
+    let nb = 0; for (const l of vlinks) nb += l.tw ? l.tw.tips.length / 3 : 0;
+    for (const l of llinks) nb += l.tw ? l.tw.tips.length / 3 : 0;
+    const bp = this.makePoints(Math.max(1, nb));
+    { const bpos = bp.g.attributes.position.array, bcol = bp.g.attributes.aColor.array, bsz = bp.g.attributes.aSize.array, bgl = bp.g.attributes.aGlow.array; let bi = 0;
+      for (const l of vlinks.concat(llinks)) {
+        if (!l.tw) continue;
+        const tc = l.learned ? { r: 1, g: 0.78, b: 0.45 } : this.lobeTint(l.a.lobe);
+        for (let k = 0; k < l.tw.tips.length; k += 3) {
+          bpos[bi * 3] = l.tw.tips[k]; bpos[bi * 3 + 1] = l.tw.tips[k + 1]; bpos[bi * 3 + 2] = l.tw.tips[k + 2];
+          const f = fade(l.tw.tips[k], l.tw.tips[k + 1], l.tw.tips[k + 2]) * 0.6;
+          bcol[bi * 3] = (tc.r * 0.6 + 0.4) * f; bcol[bi * 3 + 1] = (tc.g * 0.6 + 0.4) * f; bcol[bi * 3 + 2] = (tc.b * 0.6 + 0.4) * f; bsz[bi] = 0.85; bgl[bi] = 0.1; bi++;
+        }
+      }
+      bp.g.setDrawRange(0, bi);
+    }
+    this.boutonObj = new THREE.Points(bp.g, bp.mat); this.boutonObj.renderOrder = 3; this.boutonObj.frustumCulled = false;
+    this.scene.add(this.boutonObj);
     const sp = this.makePoints(5000);
     this.spikeGeo = sp.g; this.spikeObj = new THREE.Points(sp.g, sp.mat); this.spikeObj.renderOrder = 4; this.spikeObj.frustumCulled = false;
     this.scene.add(this.spikeObj);
@@ -1489,8 +1554,8 @@ class BrainView extends ItemView {
     this.nodes = nodes; this.links = links; this.byPath = byPath;
     this.learnedLinks = learnedLinks;
     this.learnedCounts = { neurons: nLearned, synapses: nLearnedSyn };
-    if (this.clipOn) for (const o of [this.linkObj, this.learnObj]) if (o) o.material.clippingPlanes = [this.clipPlane];
-    if (this.plugin.settings.showNotes === false) for (const o of [this.nodeObj, this.linkObj, this.learnObj]) if (o) o.visible = false;
+    if (this.clipOn) for (const o of [this.linkObj, this.learnObj, this.dendObj, this.boutonObj]) if (o) o.material.clippingPlanes = [this.clipPlane];
+    if (this.plugin.settings.showNotes === false) for (const o of [this.nodeObj, this.linkObj, this.learnObj, this.dendObj, this.boutonObj]) if (o) o.visible = false;
     for (const l of fresh.slice(0, 12)) { this.spark(l, l.a, '#ffcf8a'); this.spark(l, l.b, '#ffcf8a'); }
     this.hover = null; this.pings = [];   // spikes in flight keep travelling on the old curves
     this.needsDraw = true;
@@ -2063,8 +2128,17 @@ class BrainView extends ItemView {
     this.idleT = window.setTimeout(() => this.contentEl.addClass('cb-idle'), 2600);
   }
 
+  // less motion: 'on', or 'auto' = whatever the operating system asks for. No auto-rotate, no camera that follows, no dreaming,
+  // no decorative flicker; real events still light up and travel, because those are the data.
+  calm() {
+    const m = this.plugin.settings.reduceMotion || 'auto';
+    if (m === 'on') return true;
+    if (m !== 'auto') return false;
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
+  }
+
   flash(msg) {
-    if (!this.flashEl) this.flashEl = this.contentEl.createDiv({ cls: 'cb-flash' });
+    if (!this.flashEl) { this.flashEl = this.contentEl.createDiv({ cls: 'cb-flash' }); this.flashEl.setAttr('role', 'status'); this.flashEl.setAttr('aria-live', 'polite'); }
     this.flashEl.setText(msg);
     this.flashEl.addClass('is-on');
     if (this.flashT) window.clearTimeout(this.flashT);
@@ -2082,7 +2156,8 @@ class BrainView extends ItemView {
 
   bindKeys() {
     this.registerDomEvent(this.contentEl, 'keydown', (e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.metaKey) return;
+      if ((e.ctrlKey || e.altKey) && !(e.getModifierState && e.getModifierState('AltGraph'))) return;   // AltGr is how [ and ] are typed on many keyboards
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -2097,6 +2172,8 @@ class BrainView extends ItemView {
       else if (k === 'l') this.togglePop('layers');
       else if (k === 'm') this.toggleSlice();
       else if (k === 'v') this.setLook(this.plugin.settings.look === 'atlas' ? 'anatomy' : 'atlas', true);
+      else if (k === '[' || k === ']' || k === 'n' || k === 'p') this.cycleSpike(k === ']' || k === 'n' ? 1 : -1);
+      else if (k === 'Enter') { if (!this.enterKey(t)) used = false; }
       else if (k === ' ') { if (this.frozen) this.setTimeScale(this.timeScale && this.timeScale < 1 ? this.timeScale : 1); else this.setTimeScale(0); }
       else if (k === ',' || k === '.') this.setTimeScale(k === ',' ? ((this.timeScale || 1) <= 0.1 ? 0.1 : (this.timeScale || 1) <= 0.25 ? 0.1 : 0.25) : ((this.timeScale || 1) >= 0.25 ? 1 : 0.25));
       else if (k === 'f') { this.plugin.settings.follow = !this.plugin.settings.follow; this.plugin.saveAll(); this.flash(this.plugin.settings.follow ? 'Following activity' : 'Not following activity'); }
@@ -2151,8 +2228,9 @@ class BrainView extends ItemView {
     const out = [], tp = { x: 0, y: 0, z: 0 };
     for (const sp of this.tractSpikes || []) { this.tractPoint(sp.l, sp.fwd ? sp.t : 1 - sp.t, tp); out.push({ sp, kind: 'tract', x: tp.x, y: tp.y, z: tp.z }); }
     for (const sp of this.plugin.settings.showNotes === false ? [] : this.spikes) {
-      const l = sp.l, fwd = l.a === sp.a, A = fwd ? l.a : l.b, B = fwd ? l.b : l.a, t = sp.t, u = 1 - t;
-      out.push({ sp, kind: 'note', x: u * u * A.x + 2 * u * t * l.c.x + t * t * B.x, y: u * u * A.y + 2 * u * t * l.c.y + t * t * B.y, z: u * u * A.z + 2 * u * t * l.c.z + t * t * B.z });
+      const l = sp.l, fwd = l.a === sp.a;
+      linkPoint(l.pts, fwd ? sp.t : 1 - sp.t, tp);
+      out.push({ sp, kind: 'note', x: tp.x, y: tp.y, z: tp.z });
     }
     return out;
   }
@@ -2166,6 +2244,27 @@ class BrainView extends ItemView {
       if (d < bd) { bd = d; best = h; }
     }
     return best;
+  }
+  // keyboard: [ and ] step through the signals in flight (freezing time first), Enter opens the selected one.
+  // The same words as the pointer tooltip are announced through the live region of the flash.
+  cycleSpike(dir) {
+    if (!this.frozen) this.setTimeScale(0);
+    const heads = this.spikeHeads();
+    if (!heads.length) { this.selSpike = null; this.flash('No signal is travelling'); this.needsDraw = true; return null; }
+    const i = this.selSpike ? heads.findIndex(x => x.sp === this.selSpike.sp) : -1;
+    const h = heads[((i < 0 ? (dir > 0 ? 0 : heads.length - 1) : i + dir) + heads.length) % heads.length];
+    this.selSpike = h; this.needsDraw = true;
+    const d = this.describeSpike(h);
+    this.flash(`${heads.indexOf(h) + 1} of ${heads.length}: ${d.tag} ${d.what}${d.target ? ' · ' + d.target : ''}. Enter opens it`);
+    return h;
+  }
+  // Enter opens the selected signal, but a focused button keeps its own Enter
+  enterKey(target) { return !(target && target.tagName === 'BUTTON') && this.openSelectedSpike(); }
+  openSelectedSpike() {
+    if (!this.selSpike || !this.frozen) return false;
+    const h = this.spikeHeads().find(x => x.sp === this.selSpike.sp) || this.selSpike;
+    this.openPanel({ kind: 'signal', h });
+    return true;
   }
   // a few words on what a spike carries
   describeSpike(h) {
@@ -2332,6 +2431,7 @@ class BrainView extends ItemView {
     const proj = (p.sessions.get(sid) || {}).project || baseName(cwd || '');
     if (proj && p.lessons && p.lessons[proj] && p.lessons[proj].length) btn(`Lessons (${p.lessons[proj].length})`, 'What past turns taught about this project', () => this.openPanel({ kind: 'lessons', id: proj, back }));
     btn('Export replay', 'Save a shareable recording without names, paths, prompts or secrets', () => p.exportReplay(sid));
+    btn('Export web page', 'The same recording as one HTML page anyone can open in a browser', () => p.exportReplay(sid, true));
     const others = [...new Map(p.history.filter(x => x.sid !== sid && !x.sid.startsWith('replay-')).map(x => [x.sid, x.label])).entries()].slice(-12);
     if (others.length) {
       btn('Compare with…', 'Put this session next to another one', (e) => {
@@ -2420,6 +2520,7 @@ class BrainView extends ItemView {
       const r = row('cb-p-tools');
       button(r, 'Replay it', () => this.startReplay(m.t0 - 500, Math.max(2, m.dur / 40000), m.t1 + 1));
       button(r, 'Export replay', () => p.exportReplay(P.id));
+      button(r, 'Export web page', () => p.exportReplay(P.id, true));
       return;
     }
 
@@ -3406,8 +3507,10 @@ class BrainView extends ItemView {
     if (this.zooming) { v0.dist += (v0.distT - v0.dist) * (1 - Math.exp(-dt0 * 14)); this.lastInteract = Math.max(this.lastInteract, now - 300); }
     else if (v0.distT != null) { v0.dist = v0.distT; v0.distT = null; }
     const idle = now - this.lastInteract > 5000;
-    const following = !this.frozen && this.followCamera(dt, now);
-    const rotating = !this.frozen && !following && this.plugin.settings.autoRotate && idle;
+    const calm = this.calm();
+    this.contentEl.toggleClass('cb-calm', calm);
+    const following = !this.frozen && !calm && this.followCamera(dt, now);
+    const rotating = !this.frozen && !following && !calm && this.plugin.settings.autoRotate && idle;
     if (rotating) this.view.yaw += dt * 0.08;
     if (this.replay && !this.frozen) this.stepReplay(dt);
     this.update(dt);
@@ -3497,7 +3600,7 @@ class BrainView extends ItemView {
       else if (s.phase === 'tool') this.attend(s.toolLobe, dt * 0.12);
     }
     for (const s of this.plugin.sessions.values()) if (s.workflow && s.workflow.active) this.attend('parietal', dt * 0.08);
-    if (!this.plugin.settings.ambient) return;
+    if (!this.plugin.settings.ambient || this.calm()) return;
     this.ambientT -= dt;
     if (this.ambientT <= 0 && this.nodes.length) {
       this.ambientT = this.plugin.anyBusy() ? 0.3 : 2.4;
@@ -3546,7 +3649,7 @@ class BrainView extends ItemView {
   dreamTick(dt) {
     const P = this.plugin, st = P.settings, now = Date.now();
     if (this.dream) {
-      if (!st.dream || this.replay || P.anyLive()) { this.stopDream(); return; }
+      if (!st.dream || this.replay || P.anyLive() || this.calm()) { this.stopDream(); return; }
       const D = this.dream;
       D.wave -= dt;
       if (D.wave <= 0) { D.wave = 1.7 + Math.random() * 0.8; this.wave({ x: 0, y: THALAMUS.y, z: THALAMUS.z }, DREAM, 0.14); }   // slow waves
@@ -3557,7 +3660,7 @@ class BrainView extends ItemView {
       if (D.i >= D.list.length) D.pause = 14;
       return;
     }
-    if (!st.dream || this.mini || this.replay || P.anyLive()) return;
+    if (!st.dream || this.mini || this.replay || P.anyLive() || this.calm()) return;
     if (now - (P.lastRealEvent || P.loadedAt || 0) < 3 * 60000 || now - this.lastInteract < 30000) return;
     this.dreamCheck = (this.dreamCheck || 0) - dt;
     if (this.dreamCheck > 0) return;
@@ -3882,6 +3985,8 @@ class BrainView extends ItemView {
     }
     if (this.linkObj) this.linkObj.material.opacity = LK.link;
     if (this.learnObj) this.learnObj.material.opacity = LK.learn;
+    if (this.dendObj) this.dendObj.material.opacity = LK.dend;
+    if (this.boutonObj) { const bu = this.boutonObj.material.uniforms; bu.uScale.value = this.cssH * 0.9 * Math.min(2, window.devicePixelRatio || 1); bu.uRing.value = 0; bu.uMaxPx.value = 12 * this.renderer.getPixelRatio(); }
     if (this.tractMat) this.tractMat.uniforms.uOpacity.value = this.tractMat.uniforms.uSlabOn.value > 0.5 ? LOOKS.anatomy.tract : LK.tract;
     // spikes: light trails travelling along link curves
     const sg = this.spikeGeo;
@@ -3891,12 +3996,11 @@ class BrainView extends ItemView {
       const TR = 6;
       for (const s of this.plugin.settings.showNotes === false ? [] : this.spikes) {
         if (k + TR > 2400) break;
-        const l = s.l, fwd = l.a === s.a, A = fwd ? l.a : l.b, B = fwd ? l.b : l.a;
+        const l = s.l, fwd = l.a === s.a, lp = this._lp || (this._lp = { x: 0, y: 0, z: 0 });
         for (let j = 0; j < TR; j++) {
-          const t = Math.max(0, s.t - j * 0.035), u = 1 - t, f = 1 - j / TR;
-          pos[k * 3] = u * u * A.x + 2 * u * t * l.c.x + t * t * B.x;
-          pos[k * 3 + 1] = u * u * A.y + 2 * u * t * l.c.y + t * t * B.y;
-          pos[k * 3 + 2] = u * u * A.z + 2 * u * t * l.c.z + t * t * B.z;
+          const t = Math.max(0, s.t - j * 0.035), f = 1 - j / TR;
+          linkPoint(l.pts, fwd ? t : 1 - t, lp);
+          pos[k * 3] = lp.x; pos[k * 3 + 1] = lp.y; pos[k * 3 + 2] = lp.z;
           colA[k * 3] = s.c.r * f * LK.spike; colA[k * 3 + 1] = s.c.g * f * LK.spike; colA[k * 3 + 2] = s.c.b * f * LK.spike;
           size[k] = (j === 0 ? 3.2 : 2.4) * f; glow[k] = j === 0 ? 0.55 : 0.2 * f;
           k++;
@@ -3973,8 +4077,8 @@ class BrainView extends ItemView {
         const pts = sp.l.pts, n = pts.length / 3;
         for (let i = 0; i < n; i++) { this.project(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2], o); if (i) ctx.lineTo(o.x, o.y); else ctx.moveTo(o.x, o.y); }
       } else {
-        const l = sp.l;
-        for (let i = 0; i <= 24; i++) { const t = i / 24, u = 1 - t; this.project(u * u * l.a.x + 2 * u * t * l.c.x + t * t * l.b.x, u * u * l.a.y + 2 * u * t * l.c.y + t * t * l.b.y, u * u * l.a.z + 2 * u * t * l.c.z + t * t * l.b.z, o); if (i) ctx.lineTo(o.x, o.y); else ctx.moveTo(o.x, o.y); }
+        const lq = sp.l.pts, ln = lq.length / 3;
+        for (let i = 0; i < ln; i++) { this.project(lq[i * 3], lq[i * 3 + 1], lq[i * 3 + 2], o); if (i) ctx.lineTo(o.x, o.y); else ctx.moveTo(o.x, o.y); }
       }
       ctx.stroke(); ctx.setLineDash([]);
       // where it is now (recomputed, so the ring follows it in slow motion)
@@ -4175,6 +4279,7 @@ class AgentBrainPlugin extends Plugin {
     this.addCommand({ id: 'reset-memory', name: 'Reset memory trace', callback: () => this.resetMemory() });
     this.addCommand({ id: 'open-mini', name: 'Open mini brain in the right sidebar', callback: () => this.activateMini() });
     this.addCommand({ id: 'daily-note', name: "Write and open today's activity note", callback: async () => { const p = await this.writeDailyNote(null, true); if (!p) new Notice('Agent Brain: no activity recorded today yet.'); } });
+    this.addCommand({ id: 'session-note', name: 'Save the focused or latest session as a note', callback: async () => { const D = this.daily, sid = this.focusedSession(); const k = D && (D.sessions[sid] ? sid : Object.keys(D.sessions).sort((p, q) => D.sessions[q].last - D.sessions[p].last)[0]); const p = k && await this.writeSessionNote(k, true); if (!p) new Notice('Agent Brain: no session recorded today yet.'); } });
     this.addCommand({ id: 'reset-learned', name: 'Forget learned connections', callback: () => this.resetLearned() });
     this.addCommand({ id: 'reset-engram', name: 'Clear the activity trace', callback: () => { this.resetEngram(); new Notice('Agent Brain: activity trace cleared.'); } });
     this.addCommand({ id: 'install-hooks', name: 'Install Claude Code hooks on this computer', callback: () => this.installLocalHooks() });
@@ -4183,6 +4288,7 @@ class AgentBrainPlugin extends Plugin {
     this.addCommand({ id: 'autopsy', name: 'Session autopsy (focused or latest session)', callback: () => { const sid = this.focusedSession(); if (sid) this.openPanelInView({ kind: 'autopsy', id: sid }); else new Notice('Agent Brain: no session recorded yet.'); } });
     this.addCommand({ id: 'project-map', name: 'Project map (focused or latest session)', callback: () => { const sid = this.focusedSession(), r = sid && [...this.history].reverse().find(x => x.sid === sid && x.cwd); if (r) this.openPanelInView({ kind: 'project', id: baseName(r.cwd) }); else new Notice('Agent Brain: no project seen yet.'); } });
     this.addCommand({ id: 'export-replay', name: 'Export a shareable replay of the focused or latest session', callback: () => { const sid = this.focusedSession(); if (sid) this.exportReplay(sid); else new Notice('Agent Brain: no session recorded yet.'); } });
+    this.addCommand({ id: 'export-replay-page', name: 'Export a replay as one web page (to send to anyone)', callback: () => { const sid = this.focusedSession(); if (sid) this.exportReplay(sid, true); else new Notice('Agent Brain: no session recorded yet.'); } });
     this.addCommand({ id: 'import-replay', name: 'Play a replay file', callback: () => this.importReplay() });
     this.addSettingTab(new BrainSettingTab(this.app, this));
     this.statusBar = this.addStatusBarItem();
@@ -4630,7 +4736,7 @@ class AgentBrainPlugin extends Plugin {
           if (took >= 60000 && this.settings.notifyReply) { this.alert(s, 'finished', `Done after ${fmtDur(took)}. Waiting for your reply.`); s.wait.notified = true; }
           break;
         }
-        case 'SessionEnd': this.sessions.delete(sid); break;
+        case 'SessionEnd': if (this.settings.sessionNote && !this._replaying) this.writeSessionNote(sid); this.sessions.delete(sid); break;
         default: break;
       }
     }
@@ -4710,6 +4816,7 @@ class AgentBrainPlugin extends Plugin {
         s.lastProgress = Math.max(s.lastProgress || 0, t);
         if (!this.isDemo(s)) {
           this.countTokens(s, inT + cr + cw, out, cost);
+          this.checkBudget(s);
           // deliberation leaves its trace too: the bigger the output, the deeper the mark in prefrontal cortex
           const rec = { e: 'Thought', sid, n: M.calls, out, text: 'thinking' };
           const st = this.strikesFor(rec);
@@ -4734,6 +4841,18 @@ class AgentBrainPlugin extends Plugin {
     x.calls = (x.calls || 0) + 1; x.tokIn = (x.tokIn || 0) + inT; x.tokOut = (x.tokOut || 0) + out; x.cost = (x.cost || 0) + cost;
     this.dailyDirty = true;
   }
+  // your spending limits: one note when a session, or the day, passes its limit. Never a stop.
+  checkBudget(s) {
+    const st = this.settings;
+    if (!(st.budgetSession > 0 || st.budgetDay > 0)) return;
+    const today = !!this.daily && this.daily.day === isoDay();   // yesterday's total is not today's
+    const hits = budgetHits({ session: this.costOf(s), day: today ? this.tokensToday().cost : 0 }, { session: st.budgetSession, day: st.budgetDay }, { session: s.budgetAlerted, day: this.daily && this.daily.budgetAlerted });
+    for (const h of hits) {
+      if (h.kind === 'session') s.budgetAlerted = true; else if (this.daily) this.daily.budgetAlerted = true;
+      this.alert(s, h.kind === 'session' ? 'passed its spending limit' : 'passed the day\'s spending limit', h.text);
+    }
+  }
+  resetBudgetFlags(kind) { if (kind !== 'session' && this.daily) delete this.daily.budgetAlerted; if (kind !== 'day') for (const s of this.sessions.values()) delete s.budgetAlerted; }
   tokensToday() {
     let i = 0, o = 0, c = 0;
     for (const x of Object.values((this.daily && this.daily.sessions) || {})) { i += x.tokIn || 0; o += x.tokOut || 0; c += x.cost || 0; }
@@ -5113,16 +5232,16 @@ class AgentBrainPlugin extends Plugin {
     L.push('> [!info] Written by the Agent Brain plugin and refreshed every 10 minutes. Anything under "## My notes" is kept.', '');
     const tok = S.some(x => x.calls);
     L.push('| Session | Source | Active | Prompts | Tool calls | Subagents | Workflows | Tasks done | Failures |' + (tok ? ' Model calls | Tokens in / out | Cost |' : ''), '|---|---|---:|---:|---:|---:|---:|---:|---:|' + (tok ? '---:|---:|---:|' : ''));
-    for (const x of S) L.push(`| ${x.label} | ${x.src} | ${fmtSpan(x.busyMs)} | ${x.prompts} | ${calls(x)} | ${x.agents} | ${x.workflows} | ${x.tasksDone} | ${x.failures} |` + (tok ? ` ${x.calls || 0} | ${fmtTok(x.tokIn || 0)} / ${fmtTok(x.tokOut || 0)} | $${(x.cost || 0).toFixed(2)} |` : ''));
+    for (const x of S) L.push(`| ${mdText(x.label)} | ${mdText(x.src)} | ${fmtSpan(x.busyMs)} | ${x.prompts} | ${calls(x)} | ${x.agents} | ${x.workflows} | ${x.tasksDone} | ${x.failures} |` + (tok ? ` ${x.calls || 0} | ${fmtTok(x.tokIn || 0)} / ${fmtTok(x.tokOut || 0)} | $${(x.cost || 0).toFixed(2)} |` : ''));
     L.push('');
     for (const x of S) {
-      L.push('## ' + x.label, '');
+      L.push('## ' + mdText(x.label), '');
       const tools = Object.entries(x.tools).sort((p, q) => q[1] - p[1]).map(([k, v]) => `${(CAT[k] || CAT.other).tag.toLowerCase()} ${v}`).join(' · ');
       L.push(`**Activity:** ${hhmm(x.first)}–${hhmm(x.last)} · **Tools:** ${tools || '–'}`, '');
       const files = Object.entries(x.files).sort((p, q) => q[1] - p[1]).slice(0, 20);
       if (files.length) {
         L.push('**Files it worked with**');
-        for (const [f, n] of files) L.push(/\.md$/i.test(f) && !f.includes(':') && this.app.vault.getAbstractFileByPath(f) ? `- [[${f.replace(/\.md$/i, '')}]] · ${n}` : `- \`${f}\` · ${n}`);
+        for (const [f, n] of files) L.push(/\.md$/i.test(f) && !f.includes(':') && !/[\r\n|\[\]]/.test(f) && this.app.vault.getAbstractFileByPath(f) ? `- [[${f.replace(/\.md$/i, '')}]] · ${n}` : `- \`${mdText(f)}\` · ${n}`);
         L.push('');
       }
     }
@@ -5131,23 +5250,75 @@ class AgentBrainPlugin extends Plugin {
     return L.join('\n');
   }
 
+  // creates or refreshes one of the plugin's own notes, keeping what you wrote under "## My notes". The only place a note is read.
+  // One at a time: two notes written together (two sessions ending, a refresh in the middle) never race for a folder or a file.
+  upsertNote(path, render) {
+    const run = async () => {
+      const parts = path.includes('/') ? path.slice(0, path.lastIndexOf('/')).split('/') : [];
+      let dir = '';
+      for (const part of parts) { dir = dir ? dir + '/' + part : part; if (!this.app.vault.getAbstractFileByPath(dir)) await this.app.vault.createFolder(dir).catch(() => {}); }
+      const f = this.app.vault.getAbstractFileByPath(path);
+      const cur = f ? await this.app.vault.read(f) : null;
+      let keep = '';
+      if (cur != null) { const m = /^## My notes[ \t]*\r?$/m.exec(cur); if (m) keep = cur.slice(m.index + m[0].length).replace(/^\s+/, ''); }   // the heading on a line of its own, not the words in the callout above it
+      const md = render(keep);
+      if (f) { if (cur !== md) await this.app.vault.modify(f, md); }
+      else await this.app.vault.create(path, md);
+    };
+    const q = (this._noteQ || Promise.resolve()).then(run, run);
+    this._noteQ = q.catch(() => {});
+    return q;
+  }
+
   async writeDailyNote(D, open) {
     D = D || this.daily;
     if (!this.settings.dailyNote || !D || !Object.keys(D.sessions).length) return null;
     const path = this.dailyPath(D.day);
-    const folder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
     try {
-      if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
-      const f = this.app.vault.getAbstractFileByPath(path);
-      let keep = '';
-      if (f) { const cur = await this.app.vault.read(f); const i = cur.indexOf('## My notes'); if (i >= 0) keep = cur.slice(i + '## My notes'.length).replace(/^\s+/, ''); }
-      const md = this.renderDailyNote(D, keep);
-      if (f) { const cur = await this.app.vault.read(f); if (cur !== md) await this.app.vault.modify(f, md); }
-      else await this.app.vault.create(path, md);
+      await this.upsertNote(path, (keep) => this.renderDailyNote(D, keep));
       if (D === this.daily) this.dailyDirty = false;
       if (open) await this.app.workspace.openLinkText(path, '', true);
       return path;
     } catch (e) { console.error('[agent-brain] daily note', e); return null; }
+  }
+
+  // one note per session: what it did, with links to the notes it touched and back to the day
+  sessionNotePath(sid, x, day) {
+    const folder = String(this.settings.dailyFolder || 'Claude Activity').replace(/^\/+|\/+$/g, '');
+    return (folder ? folder + '/' : '') + 'Sessions/' + day + ' ' + noteName(x.label) + ' ' + strHash(String(sid)).toString(36).padStart(6, '0').slice(-6) + '.md';
+  }
+  renderSessionNote(sid, x, day, keep) {
+    const calls = Object.values(x.tools).reduce((n, v) => n + v, 0);
+    const daily = this.dailyPath(day).replace(/\.md$/i, '');
+    const L = ['---', 'type: claude-session', 'date: ' + day, 'project: ' + JSON.stringify(mdText(x.label)), 'source: ' + JSON.stringify(mdText(x.src)),
+      'active: ' + fmtSpan(x.busyMs), 'prompts: ' + x.prompts, 'tool_calls: ' + calls] ;
+    if (x.calls) L.push('model_calls: ' + x.calls, 'cost_usd: ' + (x.cost || 0).toFixed(2));
+    L.push('lobe: cerebellum', '---', '');
+    L.push('# ' + mdText(x.label) + ' · ' + hhmm(x.first) + '–' + hhmm(x.last), '');
+    L.push('> [!info] Written by the Agent Brain plugin. Part of [[' + daily + ']]. Anything under "## My notes" is kept.', '');
+    const tools = Object.entries(x.tools).sort((p, q) => q[1] - p[1]).map(([k, v]) => `${(CAT[k] || CAT.other).tag.toLowerCase()} ${v}`).join(' · ');
+    L.push(`**Active:** ${fmtSpan(x.busyMs)} · **Prompts:** ${x.prompts} · **Tool calls:** ${calls} · **Subagents:** ${x.agents} · **Tasks done:** ${x.tasksDone} · **Failures:** ${x.failures}`);
+    if (x.calls) L.push(`**Model calls:** ${x.calls} · **Tokens in / out:** ${fmtTok(x.tokIn || 0)} / ${fmtTok(x.tokOut || 0)} · **Cost:** $${(x.cost || 0).toFixed(2)}`);
+    L.push(`**Tools:** ${tools || '–'}`, '');
+    const files = Object.entries(x.files).sort((p, q) => q[1] - p[1]).slice(0, 40);
+    if (files.length) {
+      L.push('## Files it worked with', '');
+      for (const [f, n] of files) L.push(/\.md$/i.test(f) && !f.includes(':') && !/[\r\n|\[\]]/.test(f) && this.app.vault.getAbstractFileByPath(f) ? `- [[${f.replace(/\.md$/i, '')}]] · ${n}` : `- \`${mdText(f)}\` · ${n}`);
+      L.push('');
+    }
+    L.push('## My notes', '');
+    if (keep) L.push(keep);
+    return L.join('\n');
+  }
+  async writeSessionNote(sid, open) {
+    const D = this.daily, x = D && D.sessions[sid];
+    if (!x) return null;
+    const path = this.sessionNotePath(sid, x, D.day);
+    try {
+      await this.upsertNote(path, (keep) => this.renderSessionNote(sid, x, D.day, keep));
+      if (open) await this.app.workspace.openLinkText(path, '', true);
+      return path;
+    } catch (e) { console.error('[agent-brain] session note', e); return null; }
   }
 
   /* ---------- subagents, workflows and the task list ---------- */
@@ -5557,19 +5728,19 @@ class AgentBrainPlugin extends Plugin {
   }
 
   replayFolder() { return String(this.settings.dailyFolder || 'Claude Activity').replace(/^\/+|\/+$/g, '') + '/Replays'; }
-  async exportReplay(sid) {
+  async exportReplay(sid, asPage) {
     const m = this.sessionMetrics(sid);
     if (!m) { new Notice('Agent Brain: nothing recorded for that session.'); return null; }
     const data = scrubReplay(m.recs.filter(r => r.e !== 'PostToolUse' || r.id));
     const d = new Date(m.t0), pad = (n) => String(n).padStart(2, '0');
     const folder = this.replayFolder();
-    const path = `${folder}/replay-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+    const path = `${folder}/replay-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.${asPage ? 'html' : 'json'}`;
     try {
       if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder).catch(() => {});
-      const json = JSON.stringify(data);
+      const json = asPage ? replayHtml(data) : JSON.stringify(data);
       const f = this.app.vault.getAbstractFileByPath(path);
       if (f) await this.app.vault.modify(f, json); else await this.app.vault.create(path, json);
-      new Notice(`Agent Brain: replay saved to ${path}. It keeps timing, tools and program names only: no project, file or folder names, prompts, replies, queries, addresses or arguments.`);
+      new Notice(`Agent Brain: ${asPage ? 'replay page' : 'replay'} saved to ${path}. ${asPage ? 'Open it in a browser, or send the file: it needs nothing else. ' : ''}It keeps timing, tools and program names only: no project, file or folder names, prompts, replies, queries, addresses or arguments.`);
       return path;
     } catch (e) { console.error('[agent-brain] export', e); new Notice('Agent Brain: could not save the replay.'); return null; }
   }
@@ -5975,6 +6146,9 @@ class BrainSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Frame rate').setDesc('Adaptive: 60 fps while you drag, zoom, replay or inspect signals, 30 fps for the slow ambient motion, 20 fps while Obsidian is in the background. Smooth: always 60. Battery: 30 except while you drag.')
       .addDropdown(d => d.addOption('auto', 'Adaptive').addOption('60', 'Smooth').addOption('30', 'Battery').setValue(String(this.plugin.settings.frameRate || 'auto'))
         .onChange(async (v) => { this.plugin.settings.frameRate = v; this.plugin.settings.fps = v === '30' ? 30 : 60; await save(); }));
+    new Setting(containerEl).setName('Reduce motion').setDesc('Auto follows your system setting. On: the brain does not rotate by itself, the camera does not follow activity, it does not dream when idle and nothing flickers for decoration. Real events still light up and travel, since they are the data. Use [ ] (or P and N) to step through signals and Enter to open one.')
+      .addDropdown(d => d.addOption('auto', 'Auto (system)').addOption('on', 'On').addOption('off', 'Off').setValue(this.plugin.settings.reduceMotion || 'auto')
+        .onChange(async (v) => { this.plugin.settings.reduceMotion = v; await save(); this.plugin.forEachView(w => { w.needsDraw = true; }); }));
     new Setting(containerEl).setName('Auto-rotate').setDesc('Slowly rotates the brain when you are not interacting with it.')
       .addToggle(t => t.setValue(!!this.plugin.settings.autoRotate).onChange(async (v) => { this.plugin.settings.autoRotate = v; await save(); }));
     new Setting(containerEl).setName('Region names on the brain').setDesc('Always show lobe names. When off, a name only appears while something is happening there.')
@@ -6005,6 +6179,8 @@ class BrainSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Write a daily note').setDesc('One note per day with time, tool calls, subagents, workflows, finished tasks and files per session. Refreshed every 10 minutes; anything under "## My notes" is kept.')
       .addToggle(t => t.setValue(!!this.plugin.settings.dailyNote).onChange(async (v) => { this.plugin.settings.dailyNote = v; await save(); }))
       .addButton(b => b.setButtonText('Open today').onClick(async () => { const p = await this.plugin.writeDailyNote(null, true); if (!p) new Notice('Agent Brain: no activity recorded today yet.'); }));
+    new Setting(containerEl).setName('A note for every session').setDesc('When Claude Code reports a session ended, also write its own note (Sessions folder, next to the daily notes) with what it did today and links to the notes it worked with. A session that is killed sends nothing, and one that runs past midnight gets the note for the day it ended. Command palette: "Save the focused or latest session as a note" does it right now.')
+      .addToggle(t => t.setValue(!!this.plugin.settings.sessionNote).onChange(async (v) => { this.plugin.settings.sessionNote = v; await save(); }));
     new Setting(containerEl).setName('Folder').setDesc('Where the daily notes go.')
       .addText(t => t.setValue(this.plugin.settings.dailyFolder).onChange(async (v) => { this.plugin.settings.dailyFolder = v.trim() || 'Claude Activity'; await save(); }));
 
@@ -6015,6 +6191,11 @@ class BrainSettingTab extends PluginSettingTab {
       .addToggle(t => t.setValue(!!this.plugin.settings.notifyReply).onChange(async (v) => { this.plugin.settings.notifyReply = v; await save(); }));
     new Setting(containerEl).setName('Sessions that may be stuck').setDesc('Alert when the same command keeps failing or is run again and again, a file is edited over and over, API errors pile up, a command runs for more than 20 minutes, or nothing moves for 10 minutes while a session is working.')
       .addToggle(t => t.setValue(!!this.plugin.settings.notifyStuck).onChange(async (v) => { this.plugin.settings.notifyStuck = v; await save(); }));
+    const money = (key, name, desc) => new Setting(containerEl).setName(name).setDesc(desc)
+      .addText(t => { t.inputEl.type = 'number'; t.inputEl.min = '0'; t.setPlaceholder('0 = off').setValue(this.plugin.settings[key] > 0 ? String(this.plugin.settings[key]) : '')
+        ; t.inputEl.addEventListener('change', async () => { const n = Number(t.inputEl.value); this.plugin.settings[key] = Number.isFinite(n) && n > 0 ? n : 0; this.plugin.resetBudgetFlags(key === 'budgetDay' ? 'day' : 'session'); await save(); }); });   // when you leave the field, not on every key
+    money('budgetSession', 'Spending limit per session (US$)', 'One notice when a session\'s cost passes this. Needs "Energy from telemetry". Nothing is stopped.');
+    money('budgetDay', 'Spending limit per day (US$)', 'One notice when the day\'s total cost passes this. Needs "Energy from telemetry". Nothing is stopped.');
     new Setting(containerEl).setName('Reality check').setDesc('Watches for signs that the agent believes something that is not so: a file, command, package, module or web page that does not exist, text it tries to change that is not in the file, code using a name its own search found nowhere, and a turn that ends with "the tests pass" or "fixed" when the last run failed or no test ran. The insula and cingulate light violet, and the session lists what it found with the evidence. Hints, not proof.')
       .addToggle(t => t.setValue(this.plugin.settings.realityCheck !== false).onChange(async (v) => { this.plugin.settings.realityCheck = v; await save(); }));
     new Setting(containerEl).setName('Alert when a claim does not hold').setDesc('Notify you when a turn ends with a claim (tests pass, build works, fixed) that the last run contradicts or no run backs up.')
@@ -6059,5 +6240,6 @@ class BrainSettingTab extends PluginSettingTab {
 
 AgentBrainPlugin.fromThisMachine = fromThisMachine;   // for the tests
 AgentBrainPlugin.gpuTier = gpuTier;
+AgentBrainPlugin.BrainView = BrainView;   // for the tests
 AgentBrainPlugin.agentToHook = agentToHook;
 module.exports = AgentBrainPlugin;

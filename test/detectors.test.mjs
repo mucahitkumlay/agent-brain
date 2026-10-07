@@ -44,10 +44,10 @@ table('secrets found', [
   ['export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', 1], ['DB_PASSWORD=hunter2hunter2', 1], ['password=hunter2hunter2', 1], ['"password": "hunter2hunter2"', 1], ['--password=hunter2hunter2', 1], ['--token hunter2hunter2', 1],
   ['client_secret: abcdefgh12345678', 1], ['STRIPE_SECRET=sk_li' + 've_abcdefghijklmnopqrstuv', 1], ['curl -u admin:hunter2hunter2 https://x', 1],
   ['npm config set //registry.npmjs.org/:_authToken=npm' + '_abcdefghijklmnopqrstuvwxyz0123456789', 1], ['HF_TOKEN=hf' + '_abcdefghijklmnopqrstuvwxyzABCDEFGH', 1], ['GITLAB=glpat' + '-abcdefghijklmnopqrst', 1],
-  ['sshpass -p MyPassw0rd ssh host', 1], ['AKIA' + 'ABCDEFGHIJKLMNOP', 1], ['-----BEGIN ENCRYPTED PRIVATE KEY-----', 1], ['-----BEGIN OPENSSH PRIVATE KEY-----', 1],
+  ['sshpass -p MyPassw0rd ssh host', 1], ['AKIA' + 'ABCDEFGHIJKLMNOP', 1], ['-----BEGIN ' + 'ENCRYPTED PRIVATE KEY-----', 1], ['-----BEGIN ' + 'OPENSSH PRIVATE KEY-----', 1],
   ['AccountKey=' + 'a'.repeat(44) + '==', 1], ['https://hooks.slack.com/services/T0123ABCD/B0123ABCD/' + 'x1'.repeat(12), 1],
   ["mysql -p'S3cretPw!' -e x", 1], ['redis-cli -u redis://:pw12345@h', 1], ['postgres://admin:S3cr3tP@ss@h/db', 1],
-  ['db_password = correcthorsebatterystaple', 1], ['password=abcdefghij', 1], ['secret=thequickbrownfox', 1], ['PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC"', 1],
+  ['db_password = correcthorsebatterystaple', 1], ['password=abcdefghij', 1], ['secret=thequickbrownfox', 1], ['PRIVATE_KEY="-----BEGIN ' + 'PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC"', 1],
   ['"password": "password123"', 0], ['sk-ant-' + 'x'.repeat(24), 0], ['postgres://user:pass@localhost/db', 0], ['mysql -u root -ppassword', 0], ['curl -u admin:admin localhost', 0], ['AKIAIOSFODNN7EXAMPLE', 0], ['const password = passwordInput;', 0],
   ['const password = req.body.password;', 0], ['api_key = settings.API_KEY', 0], ['secret = secrets.token_hex(32)', 0], ['pwd = os.getcwd()', 0], ['credential = DefaultAzureCredential()', 0], ['csrf_token = generate_csrf_token()', 0], ['const token = getToken(user)', 0],
   ['password=changeme', 0], ['password=${DB_PASS}', 0], ['password: <your password>', 0], ['api_key=changeme123', 0], ['password=process.env.DB_PASSWORD', 0], ['password = os.environ["DB_PASSWORD"]', 0],
@@ -59,7 +59,7 @@ for (const [raw, secret] of [['DB_PASSWORD=hunter2hunter2', 'hunter2hunter2'], [
   ok(!m.includes(secret.slice(3)) && m.includes('…') && m !== raw, `masked: ${m}`);
 }
 ok(I.maskSecrets('echo $npm_package_version $npm_config_cache hf_hub_download ASIA_PACIFIC') === 'echo $npm_package_version $npm_config_cache hf_hub_download ASIA_PACIFIC', 'names that only look like key prefixes are left alone');
-const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAxxxxxxxxxxxxxxxxxxxx\nyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n-----END RSA PRIVATE KEY-----';
+const pem = '-----BEGIN ' + 'RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAxxxxxxxxxxxxxxxxxxxx\nyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n-----END ' + 'RSA PRIVATE KEY-----';
 ok(!I.maskSecrets('k: ' + pem).includes('MIIEow') && !I.maskSecrets("mysql -p'S3cretPw!'").includes('cretPw') && !I.maskSecrets('postgres://admin:S3cr3tP@ss@h').includes('ss@h'.slice(0, 2) + '@h') , 'a whole PEM block, quoted -p passwords and passwords with @ are masked');
 ok(I.maskSecrets('ls -la\ngit status') === 'ls -la\ngit status' && I.maskSecrets('') === '' && I.maskSecrets(null) === '', 'plain text is not touched');
 ok(I.maskSecrets(I.maskSecrets('DB_PASSWORD=hunter2hunter2')) === I.maskSecrets('DB_PASSWORD=hunter2hunter2'), 'masking twice changes nothing more');

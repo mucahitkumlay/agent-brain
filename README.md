@@ -92,7 +92,17 @@ no tokens.
 
 - **EEG traces** per region, **sleep replay** of the last hours when everything is idle, **body signals** (CPU, memory,
   network, disk of each machine on the brain stem), your **vault as neurons** with links as synapses and connections
-  learned from the files Claude uses together, and a **daily note** with what each session did.
+  learned from the files Claude uses together, a **daily note** with what each session did and, if you like, a **note
+  per session** that links to the notes it worked with.
+
+- **Neurons you can believe.** Every note grows dendrites; every link is an axon that follows the folds of the cortex or a
+  real white-matter bundle and ends in a small arbour of twigs and boutons, instead of a straight line.
+
+- **Spending limits.** Set a limit per session or per day (Settings → Alerts, needs *Energy from telemetry*) and you get
+  one notice when it is passed. Nothing is stopped.
+- **Made for everyone.** *Reduce motion* (follows your system by default) stops auto-rotate, the following camera,
+  dreaming and decorative flicker. Signals can be stepped through from the keyboard (<kbd>[</kbd> <kbd>]</kbd> or <kbd>P</kbd> <kbd>N</kbd>,
+  <kbd>Enter</kbd>) and are announced in words. The *High contrast* theme uses colour-blind safe colours.
 
 ## Install
 
@@ -139,6 +149,7 @@ Claude Code running on a remote machine reaches the plugin through a reverse SSH
 | Key | |
 |---|---|
 | <kbd>Space</kbd> | Freeze time, inspect signals (<kbd>,</kbd> <kbd>.</kbd> slower / faster) |
+| <kbd>[</kbd> <kbd>]</kbd> or <kbd>P</kbd> <kbd>N</kbd>, <kbd>Enter</kbd> | Previous / next signal (freezes time), open the selected one |
 | <kbd>S</kbd> <kbd>A</kbd> <kbd>T</kbd> <kbd>G</kbd> <kbd>E</kbd> | Sessions, activity, timeline (click to replay), regions, EEG |
 | <kbd>L</kbd> <kbd>M</kbd> <kbd>V</kbd> | Anatomy layers, MRI slice, look (anatomy or atlas) |
 | <kbd>F</kbd> <kbd>R</kbd> <kbd>H</kbd> <kbd>I</kbd> | Follow activity, reset view, hide everything, numbers and shortcuts |
@@ -150,7 +161,8 @@ On a slow machine, Settings → Frame rate → Battery and Render quality → Lo
 Click a session for its findings, last turn, plan, agents, energy and recent events (click an event for everything
 about it); a gyrus or nucleus for its memory; a note to open it. Under *Look closer*: autopsy, project map, lessons,
 export replay and compare. Command palette: **Check the setup**, **Show lessons learned per project**, **Session
-autopsy**, **Project map**, **Export a shareable replay**, **Play a replay file**.
+autopsy**, **Project map**, **Export a shareable replay**, **Export a replay as one web page**, **Save the focused or latest session
+as a note**, **Play a replay file**.
 
 ### Other agents
 
@@ -177,7 +189,7 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
 | **Network** | One request per anatomy file, once: the download from this repository's anatomy release, checked by SHA-256. No telemetry, no analytics, no other servers. |
 | **Local server** | An HTTP listener on `127.0.0.1` only, so Claude Code's hooks can report to it. |
 | **Files outside the vault** (Node `fs`) | Used in one small function and for one file only: Claude Code's `settings.json` (in `~/.claude`, or in `CLAUDE_CONFIG_DIR` if you set it). The setup check reads it to tell you whether the hooks and telemetry are in place; *Install* reads it, keeps a backup next to it (`settings.json.agent-brain.bak`, the first one is never overwritten) and writes it. Nothing else outside the vault is read, listed, written or deleted. *Install* also removes an older copy of the hooks from this vault's own `.claude/settings*.json`, through Obsidian's file API. `test/invariants.test.js` fails if this changes. |
-| **Vault listing** (`getMarkdownFiles`) | The brain draws one neuron per note and one synapse per link, so the plugin lists your notes by path and reads the link graph Obsidian already keeps. It also uses the `lobe:` frontmatter Obsidian has already cached. It does not read note contents. Files are read in three places only: the plugin's own daily note (to keep what you wrote under *My notes*), a replay you pick, and the vault's `.claude/settings*.json` that *Install* tidies. It writes only what you ask for: the optional daily note, lessons notes and replay files (in the activity folder). |
+| **Vault listing** (`getMarkdownFiles`) | The brain draws one neuron per note and one synapse per link, so the plugin lists your notes by path and reads the link graph Obsidian already keeps. It also uses the `lobe:` frontmatter Obsidian has already cached. It does not read note contents. Files are read in two places only: the plugin's own notes (daily and per session, to keep what you wrote under *My notes*), a replay you pick, and the vault's `.claude/settings*.json` that *Install* tidies. It writes only what you ask for: the optional daily note, the optional note per session, lessons notes, and replay files and pages (in the activity folder). |
 | **Answers to Claude Code** | Empty, except with *Coach mode* on (off by default): then a finding may come back as context. Never a decision. |
 | **Clipboard** | Writes to it only when you press a *Copy* button (a path, a call id, the hook JSON, a lessons list, a turn report). Never reads it. |
 | **Code scanning** | Obsidian's directory scan lists the file, vault and clipboard access above because they are in the code. They are the minimum for hooks, a note-based map and Copy buttons, and the checks above are automated. Plugin builds are produced by GitHub Actions and carry build-provenance attestations. |
@@ -197,7 +209,11 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
   each recent call — parameters, output, your prompt, Claude's reply text — so the inspector can show it. It is capped
   (about 24 million characters, oldest dropped first), never written to disk and gone when Obsidian closes. Turn it off
   under Settings → Inspector.
-- The daily activity note (optional) is written into your vault.
+- The daily activity note (optional) and, if you turn it on, a note per session are written into your vault, in the
+  folder you choose. They hold what the daily note already holds (times, tool counts, file names); the plugin reads
+  them back only to keep what you wrote under "My notes".
+- A **replay web page** is one HTML file made from the same scrubbed data as a replay file (timing, kinds of work and
+  program names). It makes no requests, loads nothing and sets a policy that forbids everything but its own script.
 - Claude Code's telemetry keeps prompts and replies redacted by default; the plugin uses only counts and timings from it.
 - A server's offline queue (events kept while the tunnel is down) drops prompt text, reply text and most of the tool
   output, redacts keys and passwords it recognises, cuts every value to 2,000 characters and is readable by its owner

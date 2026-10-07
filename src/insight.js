@@ -1,3 +1,4 @@
+import { REPLAY_PAGE } from './replaypage.js';
 // What the plugin reads into an agent's actions: risky commands, secrets, prompt-injection chains, grounding, lessons.
 // Pure functions, no state: main.js keeps the state per session.
 
@@ -160,6 +161,30 @@ export function costCompare(cost, reports, self) {
 export function muteKey(f) { return [f && f.group || 'reality', f && f.kind || '', f && f.sig || ''].join('/'); }
 
 // lessons: short, durable facts a finding teaches about a project
+// spending limits (in dollars, 0 or empty = off). Which ones were passed and not yet announced: { session, day } for each argument.
+// Only a note is ever made from this: nothing is stopped.
+export function budgetHits(cost, limit, done) {
+  const out = [], money = (n) => '$' + n.toFixed(2);
+  for (const [kind, label] of [['session', 'this session'], ['day', 'today']]) {
+    const lim = Number(limit && limit[kind]), c = Number(cost && cost[kind]);
+    if (!(lim > 0) || !Number.isFinite(lim) || !Number.isFinite(c) || (done && done[kind])) continue;
+    if (c >= lim) out.push({ kind, text: `Spent ${money(c)} ${label}; your limit is ${money(lim)}. Nothing is stopped, this is only a note.` });
+  }
+  return out;
+}
+
+// text from outside (a project folder, an agent's working directory, a file name) as one plain line in a note: no line
+// breaks to start a heading or callout, no table pipes, no backticks, no brackets to make a link
+export function mdText(s) {
+  return String(s == null ? '' : s).replace(/[\r\n\u2028\u2029\u0085]+/g, ' ').replace(/\|/g, '/').replace(/`/g, "'").replace(/\[/g, '(').replace(/\]/g, ')').trim().slice(0, 200);
+}
+
+// a file name that is safe on every system and carries no path
+export function noteName(s) {
+  const t = String(s == null ? '' : s).replace(/[\\/:*?"<>|#^\[\]\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').replace(/^[.\s]+/, '').slice(0, 60).trim();
+  return t || 'session';
+}
+
 export function lessonFor(kind, detail) {
   const d = String(detail || '');
   switch (kind) {
@@ -303,6 +328,15 @@ export function scrubReplay(recs) {
       kind: KINDS.has(r.kind) ? r.kind : '', group: /^(reality|guard|shield)$/.test(r.group || '') ? r.group : '', ntype: NTYPES.has(r.ntype) ? r.ntype : '',
     })),
   };
+}
+
+// the shareable replay as one HTML page. `data` is what scrubReplay returned; the events are copied again field by field,
+// and the JSON is written so that nothing in it can end the script block or be read as markup.
+export function replayHtml(data) {
+  const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
+  const evs = (data && Array.isArray(data.events) ? data.events : []).slice(0, 20000).map(x => { x = x || {}; const n = Number(x.dt); return { dt: Number.isFinite(n) ? Math.max(0, Math.min(n, 6048e5)) : 0, e: str(x.e, 40), tool: str(x.tool, 60), cat: str(x.cat, 20), text: str(x.text, 200), id: str(x.id, 20), aid: str(x.aid, 20), agent: str(x.agent, 40), kind: str(x.kind, 20), group: str(x.group, 10), ntype: str(x.ntype, 40) }; });
+  const json = JSON.stringify({ format: 'agent-brain-replay', version: 2, events: evs }).replace(/[<>&\u2028\u2029]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+  return REPLAY_PAGE.replace('__DATA__', () => json);
 }
 
 // colour themes: the brain surface, its rim, the background and (for colour-blind readability) the lobe colours

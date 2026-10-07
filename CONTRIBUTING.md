@@ -9,6 +9,7 @@ Issues and pull requests are welcome.
 | `src/main.js` | the plugin: listener, session state, history, engram, telemetry, view (three.js) and HUD |
 | `src/anatomy.js` | atlas tables (AAL names, gyri per kind of work) and the meshes, tracts and MRI slice materials |
 | `src/intent.js` | what a shell, PowerShell or MCP call does (read, write, run, ops, web) |
+| `src/fibre.js` | where a link between two notes runs (association fibre, real bundle or free curve), dendrites, terminal twigs; pure geometry |
 | `src/styles.css` | the HUD |
 | `scripts/` | server side: hook with offline queue, flush, link (heartbeat and body signals), installer template, tunnel launchers |
 | `assets/` | anatomy data (see `tools/anatomy/README.md` and `THIRD_PARTY_NOTICES.md`) |
@@ -23,6 +24,10 @@ npm ci
 npm run build && npm test
 node dev/prepare.mjs && (cd dev/www && python3 -m http.server 8799)   # then open the page and run __cbStart()
 ```
+
+A secret scan (gitleaks) runs on every push and pull request over the whole history; GitHub's push protection is the first
+line. In tests, build anything that looks like a key at run time (`'ghp_' + 'x'.repeat(36)`), so a fixture is never
+mistaken for a real one.
 
 Keep the invariants: local only, watch never steer, one outgoing request, received content
 is data, nothing private on disk. `test/invariants.test.js` and `test/listener.test.js` check them. Also: nothing that
