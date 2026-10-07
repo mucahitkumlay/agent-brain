@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.1
+- The injection shield also recognises tags that spell a role with spaces or attributes (`</system >`, `<system role="admin">`), which fixes the code-scanning finding "Bad HTML filtering regexp".
+- GitHub release notes are the text of this changelog for the version, with no commit list and no "Full Changelog" link.
+- New screenshots in the README, taken from this version; the README no longer carries migration notes for the old name.
+
 ## 0.14.0
 - Signals go where the work went, and nowhere at random. When Claude uses a file right after another one, a signal now runs
   from the first to the second along the connection between them, and the second note lights up when the signal arrives.

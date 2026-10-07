@@ -33,10 +33,17 @@ jobs:
             dist/main.js
             dist/manifest.json
             dist/styles.css
-      - name: Release (or refresh the files of an existing one)
+      - name: Release notes from the changelog
+        # the text of this version in CHANGELOG.md, as it is: no commit list, no "Full Changelog" link
+        run: |
+          awk -v v="$GITHUB_REF_NAME" '$0 == "## " v { f = 1; next } /^## / { f = 0 } f' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > RELEASE_NOTES.md
+          test -s RELEASE_NOTES.md || { echo "CHANGELOG.md has no section '## $GITHUB_REF_NAME'"; exit 1; }
+      - name: Release (or refresh the files and notes of an existing one)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           FILES="dist/main.js dist/manifest.json dist/styles.css"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then gh release upload "$GITHUB_REF_NAME" $FILES --clobber
-          else gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes $FILES; fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $FILES --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          else gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md $FILES; fi

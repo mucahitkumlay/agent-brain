@@ -90,14 +90,14 @@ no tokens.
 
   ![MRI slice](docs/images/mri-slice.png)
 
+- **Your vault as a brain.** Every note is a neuron with its own dendrites; every link is an axon that follows the folds
+  of the cortex or a real white-matter bundle and ends in a small arbour of twigs. When Claude uses one file right after
+  another, a connection grows between them (it gets stronger with reuse and fades when unused), and the next signal runs
+  from the first file to the second along it. Nothing lights at random: a note lights when Claude touched it or a signal
+  reached it, and a note's glow spreads only along connections that were really used.
 - **EEG traces** per region, **sleep replay** of the last hours when everything is idle, **body signals** (CPU, memory,
-  network, disk of each machine on the brain stem), your **vault as neurons** with links as synapses and connections
-  learned from the files Claude uses together (a signal runs from one file to the next in the order Claude used them), a **daily note** with what each session did and, if you like, a **note
-  per session** that links to the notes it worked with.
-
-- **Neurons you can believe.** Every note grows dendrites; every link is an axon that follows the folds of the cortex or a
-  real white-matter bundle and ends in a small arbour of twigs and boutons, instead of a straight line.
-
+  network, disk of each machine on the brain stem), a **daily note** with what each session did and, if you like, a
+  **note per session** that links to the notes it worked with.
 - **Spending limits.** Set a limit per session or per day (Settings → Alerts, needs *Energy from telemetry*) and you get
   one notice when it is passed. Nothing is stopped.
 - **Made for everyone.** *Reduce motion* (follows your system by default) stops auto-rotate, the following camera,
@@ -105,8 +105,6 @@ no tokens.
   <kbd>Enter</kbd>) and are announced in words. The *High contrast* theme uses colour-blind safe colours.
 
 ## Install
-
-**From Obsidian:** Settings → Community plugins → Browse → search "Agent Brain" (once it is listed).
 
 **With BRAT:** add `mucahitkumlay/agent-brain` in the BRAT plugin.
 
@@ -119,10 +117,6 @@ SHA-256 sums built into `main.js` and keeps it in the plugin folder. To install 
 the plugin folder yourself.
 
 Desktop only (it runs a small local HTTP listener).
-
-**Coming from Claude Brain (0.8)?** The plugin was renamed. Copy `data.json` from
-`.obsidian/plugins/claude-brain/` to `.obsidian/plugins/agent-brain/` to keep your settings and trace, then disable and
-remove Claude Brain (both would use the same port). The installed hooks keep working.
 
 ## Connect Claude Code
 
