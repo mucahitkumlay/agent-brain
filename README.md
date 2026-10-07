@@ -10,6 +10,24 @@ no tokens.
 
 ![Agent Brain overview](docs/images/overview.png)
 
+## What it watches for you
+
+Four watchers run all the time and sit in the top-left corner of the brain, so you can see that they are on and how much
+each one has caught. They only watch: nothing is ever stopped.
+
+| Watcher | It notices | Example |
+|---|---|---|
+| **Guard** | destructive commands and secrets written in the open | `rm -rf`, `git push --force`, a token on a command line |
+| **Shield** | content from outside that talks to the agent, followed by a step an attacker would want | a web page says "ignore previous instructions", then the agent reads `~/.ssh/id_rsa` |
+| **Reality** | the agent believing something that is not so | a file that does not exist, "the build passes" after a failed build |
+| **Stuck** | a loop or a hang | the same command failing three times, no progress for 10 minutes |
+
+Click a watcher to see what it caught and the evidence. No findings yet? Click **See it catch things** (or run the
+command *See it catch things* from the command palette): a short made-up session plays and all four fire, so you can see
+what they look like before they matter. These are hints, not proof.
+
+![The four watchers](docs/images/watchers.png)
+
 ## What you see
 
 - **Every action, where it belongs.** A tool call leaves the thalamus, travels along a real fibre bundle (HCP-1065
@@ -100,6 +118,8 @@ no tokens.
   **note per session** that links to the notes it worked with.
 - **Spending limits.** Set a limit per session or per day (Settings → Alerts, needs *Energy from telemetry*) and you get
   one notice when it is passed. Nothing is stopped.
+- **Signal style.** *Realistic* (default) lights a cell all at once and lets it fade in about a second, like calcium imaging,
+  with only a faint wavefront on the axon. *Illustrated* adds a bright head and a trail that are easier to follow. Settings → Signal style.
 - **Made for everyone.** *Reduce motion* (follows your system by default) stops auto-rotate, the following camera,
   dreaming and decorative flicker. Signals can be stepped through from the keyboard (<kbd>[</kbd> <kbd>]</kbd> or <kbd>P</kbd> <kbd>N</kbd>,
   <kbd>Enter</kbd>) and are announced in words. The *High contrast* theme uses colour-blind safe colours.

@@ -41,7 +41,7 @@
 .cb-caption { display: none; }
 
 /* glass surface shared by every panel */
-.cb-head, .cb-sessions, .cb-regions, .cb-log, .cb-timeline, .cb-panel, .cb-info, .cb-dock, .cb-banner-row, .cb-flash {
+.cb-head, .cb-sessions, .cb-watch, .cb-regions, .cb-log, .cb-timeline, .cb-panel, .cb-info, .cb-dock, .cb-banner-row, .cb-flash {
   background: var(--cb-glass);
   border: 1px solid var(--cb-hair);
   backdrop-filter: blur(14px) saturate(1.15);
@@ -66,6 +66,21 @@
 
 .cb-sessions { pointer-events: auto; border-radius: 12px; padding: 4px; display: flex; flex-direction: column; }
 .cb-sessions-closed .cb-sessions, :not(.cb-show-sessions) > .cb-tl .cb-sessions { display: none; }
+.cb-sessions-closed .cb-watch, :not(.cb-show-sessions) > .cb-tl .cb-watch, .cb-mini .cb-watch { display: none; }
+.cb-watch { pointer-events: auto; border-radius: 12px; padding: 4px; display: flex; flex-wrap: wrap; gap: 2px; }
+.cb-w { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: none; background: none; box-shadow: none; border-radius: 7px; color: var(--cb-mute); font-size: 11.5px; cursor: pointer; }
+.cb-w:hover { background: rgba(255, 255, 255, 0.07); color: var(--cb-ink); }
+.cb-w-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cb-ok); opacity: 0.55; }
+.cb-w.is-off { color: var(--cb-faint); text-decoration: line-through; }
+.cb-w.is-off .cb-w-dot { background: var(--cb-faint); opacity: 0.5; }
+.cb-w.is-hit { color: var(--cb-ink); }
+.cb-w.is-hit .cb-w-dot { opacity: 1; }
+.cb-w-guard.is-hit .cb-w-dot, .cb-w-shield.is-hit .cb-w-dot { background: #ff9640; box-shadow: 0 0 0 3px rgba(255, 150, 64, 0.22); }
+.cb-w-reality.is-hit .cb-w-dot { background: #b48cff; box-shadow: 0 0 0 3px rgba(180, 140, 255, 0.22); }
+.cb-w-stuck.is-hit .cb-w-dot { background: #ff6b6b; box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.22); }
+.cb-w-c { font-variant-numeric: tabular-nums; font-weight: 600; }
+.cb-w-try { margin-left: auto; color: var(--cb-accent); }
+
 .cb-empty { color: var(--cb-mute); padding: 6px 8px; }
 
 .cb-s { --sc: #888; display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; transition: background-color .15s ease, opacity .2s ease; }

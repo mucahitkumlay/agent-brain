@@ -1,8 +1,14 @@
 # Changelog
 
-## 0.14.1
+## 0.15.0
+- The four watchers are always in view. A strip under the session list shows Guard, Shield, Reality and Stuck, each with a dot while it is on and a count when it has caught something; click one to open the session and the evidence. A watcher you switched off in the settings is shown struck through. With nothing caught yet, **See it catch things** (also in the command palette) plays a made-up session in which all four fire.
+- New setting, **Signal style** (Settings, before *Reduce motion*). *Realistic* is the default and follows what calcium
+  imaging of a real brain shows: a cell lights up all at once when the signal reaches it and fades in about a second, and
+  the axon carries only a small, faint wavefront. *Illustrated* keeps the earlier look, with a bright head, a longer
+  trail and a slower fade, which is easier to follow when you want to read the path.
 - The injection shield also recognises tags that spell a role with spaces or attributes (`</system >`, `<system role="admin">`), which fixes the code-scanning finding "Bad HTML filtering regexp".
 - GitHub release notes are the text of this changelog for the version, with no commit list and no "Full Changelog" link.
+- A new end-to-end test sends a realistic Claude Code session to the listener over a real socket and checks what the README promises (regions, shell chains, guard, shield, reality check, stuck alarm, turn report, refusal of web pages).
 - New screenshots in the README, taken from this version; the README no longer carries migration notes for the old name.
 
 ## 0.14.0
