@@ -73,17 +73,28 @@ export function makeSurfaceIndex(P, N, cell = 6) {
 const _near = {};
 const SKIN = 1.0;   // mm under the surface
 export function keepIn(surface, p, d, margin = SKIN) {
-  if (!surface || !surface.nearest(p.x, p.y, p.z, _near, 2)) return false;   // looks 12 mm around: further than that is deep inside
-  const nl = Math.hypot(_near.nx, _near.ny, _near.nz); if (!(nl > 1e-6)) return false;
-  const nx = _near.nx / nl, ny = _near.ny / nl, nz = _near.nz / nl, depth = (_near.x - p.x) * nx + (_near.y - p.y) * ny + (_near.z - p.z) * nz;
-  if (depth >= margin) return false;
-  const k = Math.min(margin - depth, 10);
-  p.x -= nx * k; p.y -= ny * k; p.z -= nz * k;
-  if (d) {
-    const dn = d.x * nx + d.y * ny + d.z * nz;
-    if (dn > 0) { d.x -= nx * dn; d.y -= ny * dn; d.z -= nz * dn; const m = Math.hypot(d.x, d.y, d.z) || 1; d.x /= m; d.y /= m; d.z /= m; }
+  if (!surface) return false;
+  let moved = false;
+  // a few tries: after the move another wall can be the nearest one
+  for (let it = 0; it < 4; it++) {
+    if (!surface.nearest(p.x, p.y, p.z, _near, 2)) break;   // looks 12 mm around: further than that is deep inside
+    const nl = Math.hypot(_near.nx, _near.ny, _near.nz); if (!(nl > 1e-6)) break;
+    const nx = _near.nx / nl, ny = _near.ny / nl, nz = _near.nz / nl, depth = (_near.x - p.x) * nx + (_near.y - p.y) * ny + (_near.z - p.z) * nz;
+    if (depth >= margin) break;
+    const k = Math.min(margin - depth, 10);
+    p.x -= nx * k; p.y -= ny * k; p.z -= nz * k; moved = true;
+    if (d) {
+      const dn = d.x * nx + d.y * ny + d.z * nz;
+      if (dn > 0) { d.x -= nx * dn; d.y -= ny * dn; d.z -= nz * dn; const m = Math.hypot(d.x, d.y, d.z) || 1; d.x /= m; d.y /= m; d.z /= m; }
+    }
   }
-  return true;
+  return moved;
+}
+
+// a cell body that was placed by going `depth` mm down the normal of one surface point can end up outside the brain on the
+// other side of a thin fold; this moves it back in (a few tries, because the nearest wall can change)
+export function settle(surface, p, margin = 1.5) {
+  return keepIn(surface, p, null, margin);
 }
 
 // ---- the two ends of every real fibre, on a grid: "which fibres end near here"

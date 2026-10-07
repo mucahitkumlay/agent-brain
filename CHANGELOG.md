@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0
+- Fixed: neurons and synapses stuck out of the brain. Some cell bodies sat on the wrong side of a thin fold, and their
+  dendrites, axons and terminal twigs left the cortex with them. Now every cell body is placed under the surface, and
+  dendrites, axons and twigs that would reach it turn and run just beneath it. Checked against the real brain surface:
+  the points outside went from 295 to 5 of 51,030 (at most 0.36 mm, on the surface itself).
+
 ## 0.12.0
 - Neurons and synapses look like the real thing. Every note is a cell with its own dendrites (one apical dendrite towards
   the cortex, several basal ones, each branching), tinted by its region. A link is an axon that leaves the cell body and
@@ -7,7 +13,6 @@
   links through a real white-matter bundle from the anatomy data, otherwise a free curve that bends its own way. Each
   axon wobbles a little, thins along its length and ends in a few twigs with small swellings (boutons) at the receiving
   neuron. Signals travel along the same paths. Nothing is random between sessions: a link always runs the same way.
-  Dendrites, axons and twigs never leave the brain: where one would reach the surface it turns and runs just beneath it.
 - New: **Reduce motion** (Settings; *Auto* follows your system). No auto-rotate, no following camera, no dreaming and no
   decorative flicker; real events still light up and travel because they are the data.
 - New: step through travelling signals from the keyboard (<kbd>[</kbd> <kbd>]</kbd> or <kbd>P</kbd> <kbd>N</kbd>, which

@@ -1,5 +1,5 @@
 // where links run, and what neurons look like: geometry only
-import { keepIn, makeSurfaceIndex, makeEndIndex, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from '../src/fibre.js';
+import { keepIn, settle, makeSurfaceIndex, makeEndIndex, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from '../src/fibre.js';
 const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1; } else console.log('ok  ', m); };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 const strHash = (s) => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
@@ -94,6 +94,8 @@ ok(dendrites({ x: 0, y: 0, z: 0 }, 1, 50).pos.every(Number.isFinite), 'a neuron 
   const pp = { x: 0, y: 75, z: 0 }, dd = { x: 0, y: 1, z: 0 }; keepIn(surface, pp, dd);
   ok(pp.y < 70 && dd.y < 0.35, 'a point outside is pulled in and stops heading out');
   const q = { x: 0, y: 30, z: 0 }; ok(keepIn(surface, q) === false && q.y === 30, 'a point well inside is left alone');
+  { let bad = 0, moved = 0; for (let i = 0; i < 200; i++) { const nn = under(i * 9, -2 + (i % 5) * 0.4); const c = { x: nn.x, y: nn.y, z: nn.z }; if (settle(surface, c)) moved++; if (R(c.x, c.y, c.z) > 70 - 1.2) bad++; }
+    ok(bad === 0 && moved > 0, 'a cell body placed outside, or on the skin, is settled under the surface (' + moved + ' moved of 200, ' + bad + ' still out)'); }
   ok(keepIn(null, { x: 0, y: 99, z: 0 }) === false, 'no surface, nothing to keep inside');
 }
 

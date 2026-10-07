@@ -13,7 +13,7 @@ import { INSTALL_SH } from './scripts.js';
 import { REPO, ASSET_RELEASE, ASSETS } from './generated.js';
 import { bashCategory, bashParts, psCategory, mcpCategory, shellTargets } from './intent.js';
 import { riskyCommand, riskyScript, findSecrets, maskSecrets, UNTRUSTED_TOOLS, sensitivePath, egressCommand, secretDump, persistence, injectionText, lessonFor, agentToHook, scrubReplay, programOf, claimsOf, costCompare, muteKey, budgetHits, noteName, mdText, replayHtml, TEST_CMD, TESTS_ONLY, THEMES } from './insight.js';
-import { makeSurfaceIndex, makeEndIndex, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from './fibre.js';
+import { makeSurfaceIndex, makeEndIndex, settle, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from './fibre.js';
 import { AAL, AAL_LOBE, GYRI, aalName, bundleName, parseAal, parseInner, parseT1, parseTracts, makeInner, makeTracts, makeSlice } from './anatomy.js';
 
 const obsidian = require('obsidian');
@@ -1304,9 +1304,13 @@ class BrainView extends ItemView {
 
   // where every link runs: along the folds under the cortex, through a real fibre bundle, or as a free curve (see fibre.js).
   // A link keeps its route until one of its two neurons moves or the fibre data arrives.
+  surfaceIndex() {
+    if (!this._route || this._route.mesh !== this.mesh) this._route = { mesh: this.mesh, surface: makeSurfaceIndex(this.mesh.pos, this.vNormal), cache: new Map(), ends: null, endIdx: null };
+    return this._route.surface;
+  }
   routeLinks(links) {
-    const P = this.mesh.pos, Nn = this.vNormal, G = this.plugin.geo, T = this.tractLines || [];
-    if (!this._route || this._route.mesh !== this.mesh) this._route = { mesh: this.mesh, surface: makeSurfaceIndex(P, Nn), cache: new Map(), ends: null, endIdx: null };
+    const G = this.plugin.geo, T = this.tractLines || [];
+    this.surfaceIndex();
     const R = this._route;
     if (G && G.nTracts && T.length === G.nTracts && R.ends !== G.ends) { R.ends = G.ends; R.endIdx = makeEndIndex(G.ends); R.cache.clear(); }
     const real = R.endIdx ? 't' : '-', centre = { x: 0, y: -4, z: 2 };
@@ -1349,7 +1353,7 @@ class BrainView extends ItemView {
       c.lobe = pick; load[pick] += c.files.length;
     }
 
-    const P = this.mesh.pos, Nn = this.vNormal;
+    const P = this.mesh.pos, Nn = this.vNormal, surf = this.surfaceIndex();
     const old = this.byPath;
     const nodes = [], byPath = new Map();
     for (const c of clusters.values()) {
@@ -1384,6 +1388,7 @@ class BrainView extends ItemView {
           const depth = 2.5 + r2 * 4; // just beneath the cortex (mm)
           x = P[vi * 3] - Nn[vi * 3] * depth; y = P[vi * 3 + 1] - Nn[vi * 3 + 1] * depth; z = P[vi * 3 + 2] - Nn[vi * 3 + 2] * depth;
           nx0 = Nn[vi * 3]; ny0 = Nn[vi * 3 + 1]; nz0 = Nn[vi * 3 + 2];
+          const sp = { x, y, z }; if (settle(surf, sp)) { x = sp.x; y = sp.y; z = sp.z; }   // never outside the brain, even in a thin fold
         }
         const prev = old.get(f.path);
         const n = { path: f.path, name: f.basename, lobe, x, y, z, nx: nx0, ny: ny0, nz: nz0, deg: 0, adj: [], act: prev ? prev.act : 0, actColor: col3(SIGNAL), labelT: 0, hub: lobe === 'thalamus', sx: 0, sy: 0, vis: true };
@@ -1416,6 +1421,7 @@ class BrainView extends ItemView {
       const n = { path: key, name: nn.name, lobe, learned: true, file: nn.path, proj: nn.proj, w, uses: nn.n,
         x: P[vi * 3] - Nn[vi * 3] * depth, y: P[vi * 3 + 1] - Nn[vi * 3 + 1] * depth, z: P[vi * 3 + 2] - Nn[vi * 3 + 2] * depth, nx: Nn[vi * 3], ny: Nn[vi * 3 + 1], nz: Nn[vi * 3 + 2],
         deg: 0, adj: [], act: prev ? prev.act : 0, actColor: col3(SIGNAL), labelT: 0, hub: false, sx: 0, sy: 0, vis: true, firedAt: prev ? prev.firedAt : 0 };
+      settle(surf, n);
       nodes.push(n); byPath.set(key, n); nLearned++;
     }
 
