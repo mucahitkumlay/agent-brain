@@ -7,6 +7,7 @@
   links through a real white-matter bundle from the anatomy data, otherwise a free curve that bends its own way. Each
   axon wobbles a little, thins along its length and ends in a few twigs with small swellings (boutons) at the receiving
   neuron. Signals travel along the same paths. Nothing is random between sessions: a link always runs the same way.
+  Dendrites, axons and twigs never leave the brain: where one would reach the surface it turns and runs just beneath it.
 - New: **Reduce motion** (Settings; *Auto* follows your system). No auto-rotate, no following camera, no dreaming and no
   decorative flicker; real events still light up and travel because they are the data.
 - New: step through travelling signals from the keyboard (<kbd>[</kbd> <kbd>]</kbd> or <kbd>P</kbd> <kbd>N</kbd>, which

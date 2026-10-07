@@ -38,10 +38,10 @@ export function makeSurfaceIndex(P, N, cell = 6) {
   for (let i = 0; i < nv; i++) order[fill[cellIdx[i]]++] = i;
   return {
     // writes { x, y, z, nx, ny, nz } of the nearest vertex into out; false when nothing is within ~4 cells
-    nearest(x, y, z, out) {
+    nearest(x, y, z, out, maxR = 4) {
       const cx = Math.min(nx - 1, Math.max(0, Math.floor((x - x0) / cell))), cy = Math.min(ny - 1, Math.max(0, Math.floor((y - y0) / cell))), cz = Math.min(nz - 1, Math.max(0, Math.floor((z - z0) / cell)));
       let best = -1, bd = Infinity;
-      for (let r = 0; r <= 4; r++) {
+      for (let r = 0; r <= maxR; r++) {
         for (let ix = cx - r; ix <= cx + r; ix++) {
           if (ix < 0 || ix >= nx) continue;
           for (let iy = cy - r; iy <= cy + r; iy++) {
@@ -65,6 +65,25 @@ export function makeSurfaceIndex(P, N, cell = 6) {
       return true;
     },
   };
+}
+
+// keep a point inside the cortex: when it is outside the surface (or closer than `margin` mm to it) it is moved inwards,
+// and the way it is heading (d, a unit vector, optional) loses its outward part, so a branch that reaches the surface runs along
+// just beneath it instead of leaving the brain. Returns true when the point was moved.
+const _near = {};
+const SKIN = 1.0;   // mm under the surface
+export function keepIn(surface, p, d, margin = SKIN) {
+  if (!surface || !surface.nearest(p.x, p.y, p.z, _near, 2)) return false;   // looks 12 mm around: further than that is deep inside
+  const nl = Math.hypot(_near.nx, _near.ny, _near.nz); if (!(nl > 1e-6)) return false;
+  const nx = _near.nx / nl, ny = _near.ny / nl, nz = _near.nz / nl, depth = (_near.x - p.x) * nx + (_near.y - p.y) * ny + (_near.z - p.z) * nz;
+  if (depth >= margin) return false;
+  const k = Math.min(margin - depth, 10);
+  p.x -= nx * k; p.y -= ny * k; p.z -= nz * k;
+  if (d) {
+    const dn = d.x * nx + d.y * ny + d.z * nz;
+    if (dn > 0) { d.x -= nx * dn; d.y -= ny * dn; d.z -= nz * dn; const m = Math.hypot(d.x, d.y, d.z) || 1; d.x /= m; d.y /= m; d.z /= m; }
+  }
+  return true;
 }
 
 // ---- the two ends of every real fibre, on a grid: "which fibres end near here"
@@ -211,13 +230,22 @@ export function routeLink(a, b, o) {
       pts[i * 3] += dir1.x * u + dir2.x * v; pts[i * 3 + 1] += dir1.y * u + dir2.y * v; pts[i * 3 + 2] += dir1.z * u + dir2.z * v;
     }
   }
+  // nothing leaves the cortex: points that came out outside are pulled in, and the kinks that makes are smoothed
+  if (o.surface && d > 1e-6) {
+    const q = { x: 0, y: 0, z: 0 }; let moved = false;
+    for (let i = 1; i < N_SEG; i++) { q.x = pts[i * 3]; q.y = pts[i * 3 + 1]; q.z = pts[i * 3 + 2]; if (keepIn(o.surface, q)) { pts[i * 3] = q.x; pts[i * 3 + 1] = q.y; pts[i * 3 + 2] = q.z; moved = true; } }
+    if (moved) {
+      for (let pass = 0; pass < 2; pass++) for (let i = 1; i < N_SEG; i++) for (let c = 0; c < 3; c++) pts[i * 3 + c] = 0.25 * pts[(i - 1) * 3 + c] + 0.5 * pts[i * 3 + c] + 0.25 * pts[(i + 1) * 3 + c];
+      for (let i = 1; i < N_SEG; i++) { q.x = pts[i * 3]; q.y = pts[i * 3 + 1]; q.z = pts[i * 3 + 2]; if (keepIn(o.surface, q)) { pts[i * 3] = q.x; pts[i * 3 + 1] = q.y; pts[i * 3 + 2] = q.z; } }
+    }
+  }
   pts[0] = a.x; pts[1] = a.y; pts[2] = a.z; pts[N_SEG * 3] = b.x; pts[N_SEG * 3 + 1] = b.y; pts[N_SEG * 3 + 2] = b.z;
   return { pts, len, kind };
 }
 
 // the terminal arbour at the receiving end (the last part of the axon splits into a few twigs, each ending in a small
 // swelling, a bouton, where it meets the other neuron). seg: segment pairs x y z x y z; tips: x y z of every bouton.
-export function twigs(pts, seed, per = 3) {
+export function twigs(pts, seed, per = 3, surface = null) {
   const rand = rng(seed ^ 0x5bd1e995), n = pts.length / 3 - 1, seg = [], tips = [];
   const at = (i) => ({ x: pts[i * 3], y: pts[i * 3 + 1], z: pts[i * 3 + 2] });
   const end = at(n);
@@ -233,6 +261,7 @@ export function twigs(pts, seed, per = 3) {
     for (let k = 0; k < 2; k++) {
       const b = bend(); let ex = d.x + b.x, ey = d.y + b.y, ez = d.z + b.z; const mm = Math.hypot(ex, ey, ez) || 1; d = { x: ex / mm, y: ey / mm, z: ez / mm };
       const r = { x: q.x + d.x * L / 2, y: q.y + d.y * L / 2, z: q.z + d.z * L / 2 };
+      keepIn(surface, r, d);
       seg.push(q.x, q.y, q.z, r.x, r.y, r.z); q = r;
     }
     if (level === 0 && rand() < 0.55) {
@@ -254,7 +283,7 @@ export function twigs(pts, seed, per = 3) {
 // the dendrites of a neuron: one apical dendrite towards the cortical surface, several basal ones spreading sideways and
 // down, each branching up to twice. n: { x, y, z, nx, ny, nz } (nx.. = which way is out); budget = most segments allowed.
 // Returns segment pairs and one 0..1 brightness per vertex (strong near the cell body, fading along each branch).
-export function dendrites(n, seed, budget, scale = 1) {
+export function dendrites(n, seed, budget, scale = 1, surface = null) {
   const rand = rng(seed ^ 0x27d4eb2f), pos = [], inten = [];
   const unit = (v) => { const m = Math.hypot(v.x, v.y, v.z) || 1; return { x: v.x / m, y: v.y / m, z: v.z / m }; };
   const rv = () => unit({ x: rand() - 0.5, y: rand() - 0.5, z: rand() - 0.5 });
@@ -265,6 +294,7 @@ export function dendrites(n, seed, budget, scale = 1) {
     for (let s = 0; s < 3; s++) {
       const j = rv(); d = unit({ x: d.x + j.x * 0.45, y: d.y + j.y * 0.45, z: d.z + j.z * 0.45 });
       const e = { x: q.x + d.x * len / 3, y: q.y + d.y * len / 3, z: q.z + d.z * len / 3 };
+      keepIn(surface, e, d);
       pos.push(q.x, q.y, q.z, e.x, e.y, e.z);
       inten.push(0.95 - 0.7 * Math.min(1, (from + s * len / 3) / total), 0.95 - 0.7 * Math.min(1, (from + (s + 1) * len / 3) / total));
       q = e;

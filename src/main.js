@@ -1318,7 +1318,7 @@ class BrainView extends ItemView {
       if (!r || r.sig !== sig) {
         const seed = strHash(key);
         r = routeLink(l.a, l.b, { seed, surface: R.surface, endIdx: R.endIdx, ends: R.ends, tracts: T, centre });
-        r.tw = twigs(r.pts, seed); r.sig = sig; R.cache.set(key, r);
+        r.tw = twigs(r.pts, seed, 3, R.surface); r.sig = sig; R.cache.set(key, r);
       }
       l.pts = r.pts; l.len = r.len; l.kind = r.kind; l.tw = r.tw;
     }
@@ -1509,7 +1509,7 @@ class BrainView extends ItemView {
     this.scene.add(this.learnObj);
     // dendrites: every neuron grows its own tree, tinted by its region, bright at the cell body and fading outwards
     const budget = Math.max(10, Math.min(100, Math.floor(150000 / Math.max(1, nodes.length))));
-    const trees = nodes.map(n => dendrites(n, strHash(n.path), n.learned ? Math.min(budget, 26) : n.hub ? Math.min(budget, 40) : budget, Math.max(0.7, Math.min(1.5, n.size / 3.4))));
+    const trees = nodes.map(n => dendrites(n, strHash(n.path), n.learned ? Math.min(budget, 26) : n.hub ? Math.min(budget, 40) : budget, Math.max(0.7, Math.min(1.5, n.size / 3.4)), this._route && this._route.surface));
     let dn = 0; for (const t of trees) dn += t.inten.length;
     const dpos = new Float32Array(Math.max(1, dn) * 3), dcol = new Float32Array(dpos.length);
     let dq = 0;

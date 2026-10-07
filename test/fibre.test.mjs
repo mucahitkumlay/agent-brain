@@ -1,5 +1,5 @@
 // where links run, and what neurons look like: geometry only
-import { makeSurfaceIndex, makeEndIndex, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from '../src/fibre.js';
+import { keepIn, makeSurfaceIndex, makeEndIndex, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from '../src/fibre.js';
 const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1; } else console.log('ok  ', m); };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 const strHash = (s) => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
@@ -69,6 +69,33 @@ let tip = 0, base = 0; { const first = full.inten[0], lastI = Math.min(...full.i
 let outward = 0; for (let k = 0; k < 20; k++) { const nn = under(100 + k, 3), d = dendrites(nn, 50 + k, 100); let best = 0; for (let i = 0; i < d.pos.length; i += 6) { const L = dist({ x: d.pos[i], y: d.pos[i + 1], z: d.pos[i + 2] }, nn); if (L > 0.1) continue; } const tipv = { x: d.pos[3] - nn.x, y: d.pos[4] - nn.y, z: d.pos[5] - nn.z }; if (tipv.x * nn.nx + tipv.y * nn.ny + tipv.z * nn.nz > 0) outward++; }
 ok(outward >= 17, 'the first (apical) dendrite grows towards the surface (' + outward + '/20)');
 ok(dendrites({ x: 0, y: 0, z: 0 }, 1, 50).pos.every(Number.isFinite), 'a neuron with no known surface direction: still a tree');
+
+// nothing leaves the brain: every dendrite, twig and route stays under the surface (radius 70 here)
+{
+  const R = (x, y, z) => Math.hypot(x, y, z); let worst = 0, outSegs = 0, tot = 0;
+  for (let i = 0; i < 300; i++) {
+    const nn = under(i * 5, i % 7 < 2 ? 1 : 3), tr = dendrites(nn, 70 + i, 100, 1.5, surface);
+    for (let k = 0; k < tr.pos.length; k += 3) { const rr = R(tr.pos[k], tr.pos[k + 1], tr.pos[k + 2]); tot++; if (rr > 69.2) outSegs++; worst = Math.max(worst, rr); }
+  }
+  ok(outSegs === 0 && worst < 69.2, 'dendrites stay inside the cortex (outermost point ' + worst.toFixed(2) + ' of 70 mm, ' + tot + ' points)');
+  let un = 0, base = 0; for (let i = 0; i < 300; i++) { const nn = under(i * 5, 1), tr = dendrites(nn, 70 + i, 100, 1.5); for (let k = 0; k < tr.pos.length; k += 3) if (R(tr.pos[k], tr.pos[k + 1], tr.pos[k + 2]) > 70) un++; } base = un;
+  ok(base > 0, 'without the surface the same trees do poke out (' + base + ' points), so the test above means something');
+  // apical dendrites still reach up towards the surface, just not through it
+  let reach = 0; for (let i = 0; i < 40; i++) { const nn = under(i * 11, 3), tr = dendrites(nn, 5 + i, 100, 1.5, surface); let m = 0; for (let k = 0; k < tr.pos.length; k += 3) m = Math.max(m, R(tr.pos[k], tr.pos[k + 1], tr.pos[k + 2])); if (m > 66.5) reach++; }
+  ok(reach >= 30, 'they still grow up to just under the surface (' + reach + '/40)');
+  let tw = 0, rt = 0, rk = {}; const far = { x: 0, y: 0, z: 0 };
+  for (let i = 0; i < 400; i++) {
+    const x = under(i * 3, i % 3), y = under((i * 37 + 11) % 4000 + 100, 1 + i % 3); if (x.path === y.path) continue;
+    const r = routeLink(x, y, ctx(strHash(x.path + '>' + y.path))); rk[r.kind] = (rk[r.kind] || 0) + 1;
+    for (let k = 3; k < r.pts.length - 3; k += 3) if (R(r.pts[k], r.pts[k + 1], r.pts[k + 2]) > 70 - 0.5) rt++;
+    const t = twigs(r.pts, i, 3, surface); for (let k = 0; k < t.seg.length; k += 3) if (R(t.seg[k], t.seg[k + 1], t.seg[k + 2]) > 70 - 0.5 && k > 0) tw++;
+  }
+  ok(rt === 0 && tw === 0, 'routes and terminal twigs stay inside (' + rt + ' route points, ' + tw + ' twig points outside; kinds ' + JSON.stringify(rk) + ')');
+  const pp = { x: 0, y: 75, z: 0 }, dd = { x: 0, y: 1, z: 0 }; keepIn(surface, pp, dd);
+  ok(pp.y < 70 && dd.y < 0.35, 'a point outside is pulled in and stops heading out');
+  const q = { x: 0, y: 30, z: 0 }; ok(keepIn(surface, q) === false && q.y === 30, 'a point well inside is left alone');
+  ok(keepIn(null, { x: 0, y: 99, z: 0 }) === false, 'no surface, nothing to keep inside');
+}
 
 // big vault: 4000 neurons and 12000 links, in a fair time
 const t0 = Date.now(); let routed = 0;
