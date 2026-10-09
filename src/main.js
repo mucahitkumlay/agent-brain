@@ -1815,7 +1815,9 @@ class BrainView extends ItemView {
   ping(n, hex) {
     n.labelT = 3.2; this.pings.push({ n, t: 0, c: col3(hex || '#ffffff') });
     this.labeled = (this.labeled || []).filter(x => x !== n).concat([n]);
-    while (this.labeled.length > 3) this.labeled.shift().labelT = 0;   // at most 3 labels at once
+    // at most 3 labels at once; a note picked in the notes view keeps its label
+    const keep = this.noteFocus && this.noteFocus.n;
+    while (this.labeled.length > 3) { const i = this.labeled.findIndex(x => x !== keep); if (i < 0) break; this.labeled.splice(i, 1)[0].labelT = 0; }
   }
 
   lobeBurst(lobe, hex, amp, count, shex) {
@@ -3720,6 +3722,7 @@ class BrainView extends ItemView {
   showNoteLinks(n, quiet) {
     n.act = Math.max(n.act, quiet ? 0.55 : 1.1); n.actColor = col3('#ffffff'); n.firedAt = Date.now();
     if (!quiet) { this.pulse(n, '#ffffff', 0.8, 9, 2.6); this.ping(n, '#ffffff'); }
+    else { n.labelT = Math.max(n.labelT, 4.5); if (!(this.labeled || []).includes(n)) this.labeled = (this.labeled || []).concat([n]); }
     const adj = n.adj.filter(e => e.n && !e.n.learned).sort((a, b) => b.n.deg - a.n.deg).slice(0, quiet ? 16 : 40);
     adj.forEach((e, i) => window.setTimeout(() => {
       if (!this.noteFocus || this.noteFocus.n !== n) return;
