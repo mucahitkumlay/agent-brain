@@ -14,12 +14,13 @@ import { REPO, ASSET_RELEASE, ASSETS } from './generated.js';
 import { bashCategory, bashParts, psCategory, mcpCategory, shellTargets } from './intent.js';
 import { riskyCommand, riskyScript, findSecrets, maskSecrets, UNTRUSTED_TOOLS, sensitivePath, egressCommand, secretDump, persistence, injectionText, lessonFor, agentToHook, scrubReplay, programOf, claimsOf, costCompare, muteKey, budgetHits, noteName, mdText, replayHtml, TEST_CMD, TESTS_ONLY, THEMES } from './insight.js';
 import { explainFinding, incidents, LEVELS } from './findings.js';
+import { classifyNote, parseMappings, placementReport, NOTE_KINDS, NOTE_LOBES } from './classify.js';
 import { approvalRule, usageReport, BETTER, promptFeatures, foldOld, weekSeries, promptTips, claudeMdDraft, reviewDigest } from './usage.js';
 import { makeSurfaceIndex, makeEndIndex, settle, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from './fibre.js';
 import { AAL, AAL_LOBE, GYRI, aalName, bundleName, parseAal, parseInner, parseT1, parseTracts, makeInner, makeTracts, makeSlice } from './anatomy.js';
 
 const obsidian = require('obsidian');
-const { Plugin, ItemView, Notice, PluginSettingTab, Setting, setIcon, requestUrl } = obsidian;
+const { Plugin, ItemView, Notice, PluginSettingTab, Setting, setIcon, requestUrl, getAllTags } = obsidian;
 const http = require('http');
 
 const VIEW_TYPE = 'agent-brain-view';
@@ -34,7 +35,7 @@ const DEFAULTS = {
   traceMinutes: 90, vitals: true, showVitals: true,
   telemetry: true, notifyStuck: true, dream: true, showEeg: false, hintFreeze: false, callDetails: true, look: 'anatomy', realityCheck: true, notifyReality: true,
   guard: true, shield: true, notifyGuard: true, evidence: true, lessons: true, theme: 'night', coach: false, setupSeen: false,
-  reduceMotion: 'auto', signalStyle: 'real', budgetSession: 0, budgetDay: 0, sessionNote: false, reviewAnon: false,
+  reduceMotion: 'auto', signalStyle: 'real', budgetSession: 0, budgetDay: 0, sessionNote: false, reviewAnon: false, noteMap: '',
 };
 // "who": one color per session. Chosen to stay apart from the lobe colors ("what").
 const SESSION_COLORS = ['#7fe0c2', '#c3a6ff', '#7cc4ff', '#f59ac0', '#b6e388', '#dfe6f2'];
@@ -103,15 +104,6 @@ const ROUTES = {
 };
 const NUCLEUS = { read: 'Hippocampus', write: 'Putamen', exec: 'Caudate nucleus', plan: 'Caudate nucleus', ops: 'Globus pallidus', mcp: 'Globus pallidus', web: 'Thalamus', agent: 'Thalamus', other: 'Thalamus' };
 
-const LOBE_RULES = [
-  [/(^|\/)(hubs?|index|moc|home)(\/|$)/i, 'thalamus'],
-  [/(^|\/)(daily|journal|logs?|incidents?|handoffs?)(\/|$)/i, 'cerebellum'],
-  [/(^|\/)(lessons?|memory|memories|owner|people|persons?|learn\w*|notes?)(\/|$)/i, 'temporal'],
-  [/(^|\/)(docs?|references?|sources?|repos?|archive|readme)(\/|$)/i, 'occipital'],
-  [/(^|\/)(projects?|decisions?|plans?|tasks?|todo|roadmap)(\/|$)/i, 'frontal'],
-  [/(^|\/)(drafts?|writing|edits?|templates?)(\/|$)/i, 'motor'],
-  [/(^|\/)(tools?|plugins?|kernel|install|security|tests?|concepts?|agents?)(\/|$)/i, 'parietal'],
-];
 
 // three.js coordinates (mm): x right, y up, z posterior (+) / anterior (-)
 const THALAMUS = { x: 11, y: -3, z: 3 };
@@ -621,7 +613,7 @@ class BrainView extends ItemView {
     this.kpiEl = this.infoEl.createDiv({ cls: 'cb-kpis' });
     this.srcEl = this.infoEl.createDiv({ cls: 'cb-srcs' });
     const keys = this.infoEl.createDiv({ cls: 'cb-keys' });
-    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['W', 'Watchers'], ['U', 'Use Claude Code better'], ['?', 'What can I do here?'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy or atlas'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], ['[ ] or P N', 'Previous / next signal'], ['Enter', 'Open the selected signal'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
+    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['W', 'Watchers'], ['D', 'Notes: find a note'], ['U', 'Use Claude Code better'], ['?', 'What can I do here?'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy or atlas'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], ['[ ] or P N', 'Previous / next signal'], ['Enter', 'Open the selected signal'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
       const r = keys.createDiv({ cls: 'cb-key-row' });
       r.createEl('kbd', { text: k }); r.createSpan({ text: d });
     }
@@ -677,6 +669,7 @@ class BrainView extends ItemView {
     dockBtn('showActivity', 'list', 'Activity (A)', () => this.toggleUi('showActivity'));
     dockBtn('showTimeline', 'history', 'Timeline (T)', () => this.toggleUi('showTimeline'));
     dockBtn('showRegions', 'brain', 'Regions (G)', () => this.toggleUi('showRegions'));
+    dockBtn('notes', 'files', 'Notes: your vault in the brain (D)', () => this.togglePanelKind('notes'));
     dockBtn('showEeg', 'activity', 'EEG traces (E)', () => this.toggleUi('showEeg'));
     this.dockEl.createSpan({ cls: 'cb-dock-sep' });
     dockBtn('layers', 'layers', 'Anatomy layers (L)', () => this.togglePop('layers'));
@@ -1312,22 +1305,21 @@ class BrainView extends ItemView {
 
   /* ---------- place notes into lobes ---------- */
 
-  lobeForFile(f) {
+  // where a note goes and why, from what Obsidian's metadata cache knows about it (never its text)
+  placeFile(f) {
     const cache = this.app.metadataCache.getFileCache ? this.app.metadataCache.getFileCache(f) : null;
-    const fm = cache && cache.frontmatter;
-    const want = fm && (fm.lobe || fm['brain-lobe']);
-    if (want && LOBES[String(want).toLowerCase()]) return String(want).toLowerCase();
-    // top-down through the folder path: the first matching folder name wins (projects/api/memory → frontal)
-    const segs = f.path.split('/').slice(0, -1);
-    for (const seg of segs) for (const [re, lobe] of LOBE_RULES) if (re.test('/' + seg + '/')) return lobe;
-    for (const [re, lobe] of LOBE_RULES) if (re.test('/' + f.basename + '/')) return lobe;
-    return null;
+    let tags = [];
+    try { tags = cache ? (typeof getAllTags === 'function' ? getAllTags(cache) : (cache.tags || []).map(t => t.tag)) || [] : []; } catch (e) { /* no tags */ }
+    const info = { path: f.path, basename: f.basename, frontmatter: cache && cache.frontmatter, tags };
+    return { info, result: classifyNote(info, this.noteRules || []) };
   }
+  lobeForFile(f) { return this.placeFile(f).result.lobe; }
 
   graphSignature() {
     const files = this.app.vault.getMarkdownFiles();
     let h = files.length >>> 0, n = 0;
-    for (const f of files) h = (Math.imul(h, 31) + strHash(f.path)) >>> 0;
+    for (const f of files) h = (Math.imul(h, 31) + strHash(f.path + '>' + (this.lobeForFile(f) || ''))) >>> 0;
+    h = (h ^ strHash(String(this.plugin.settings.noteMap || ''))) >>> 0;
     const rl = this.app.metadataCache.resolvedLinks || {};
     for (const a in rl) for (const b in rl[a]) { h = (h ^ strHash(a + '>' + b)) >>> 0; n++; }
     return h + ':' + files.length + ':' + n;
@@ -1361,28 +1353,41 @@ class BrainView extends ItemView {
 
   async buildGraph() {
     if (!this.scene) return;
+    this.noteRules = parseMappings(this.plugin.settings.noteMap).rules;   // before the signature: it depends on them
     this.graphSig = this.graphSignature();
     const files = this.app.vault.getMarkdownFiles();
     const clusterKey = (p) => { const s = p.split('/'); return s.length > 2 ? s[0] + '/' + s[1] : s.length === 2 ? s[0] : '(root)'; };
-    const clusters = new Map();
+    // each note goes where its own frontmatter, tags, folder or name say; notes that say nothing join the rest of their
+    // folder, and a folder where no note says anything goes to the least busy region
+    const folders = new Map(), place = new Map();
     for (const f of files) {
-      const key = clusterKey(f.path);
-      let c = clusters.get(key);
-      if (!c) { c = { key, files: [], lobe: null }; clusters.set(key, c); }
-      c.files.push(f);
+      const key = clusterKey(f.path), r = this.placeFile(f).result;
+      place.set(f.path, r);
+      let g = folders.get(key);
+      if (!g) { g = { key, files: [], votes: {} }; folders.set(key, g); }
+      g.files.push(f);
+      if (r.lobe) g.votes[r.lobe] = (g.votes[r.lobe] || 0) + 1;
     }
+    const clusters = new Map();
     const load = Object.fromEntries(LOBE_ORDER.map(k => [k, 0]));
     const pending = [];
-    for (const c of clusters.values()) {
-      const votes = {};
-      for (const f of c.files) { const l = this.lobeForFile(f); if (l) votes[l] = (votes[l] || 0) + 1; }
-      const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
-      if (best) { c.lobe = best[0]; load[c.lobe] += c.files.length; } else pending.push(c);
+    for (const g of folders.values()) {
+      const best = Object.entries(g.votes).sort((a, b) => b[1] - a[1])[0], major = best ? best[0] : null;
+      for (const f of g.files) {
+        const own = place.get(f.path).lobe, lobe = own || major;
+        // the folder's main group keeps the folder's key (and so its place in the brain); the others get their own
+        const key = !lobe ? g.key : lobe === major ? g.key : g.key + '#' + lobe;
+        let c = clusters.get(key);
+        if (!c) { c = { key, files: [], lobe, folder: g.key }; clusters.set(key, c); if (!lobe) pending.push(c); }
+        c.files.push(f);
+        if (lobe) load[lobe]++;
+      }
     }
     for (const c of pending.sort((a, b) => b.files.length - a.files.length)) {
       const pick = ['parietal', 'frontal', 'occipital', 'motor', 'temporal'].sort((a, b) => load[a] - load[b])[0];
-      c.lobe = pick; load[pick] += c.files.length;
+      c.lobe = pick; c.fallback = true; load[pick] += c.files.length;
     }
+    this.placement = placementReport(files.map(f => ({ info: this.placeFile(f).info, result: place.get(f.path) })));
 
     const P = this.mesh.pos, Nn = this.vNormal, surf = this.surfaceIndex();
     const old = this.byPath;
@@ -1422,7 +1427,8 @@ class BrainView extends ItemView {
           const sp = { x, y, z }; if (settle(surf, sp)) { x = sp.x; y = sp.y; z = sp.z; }   // never outside the brain, even in a thin fold
         }
         const prev = old.get(f.path);
-        const n = { path: f.path, name: f.basename, lobe, x, y, z, nx: nx0, ny: ny0, nz: nz0, deg: 0, adj: [], act: prev ? prev.act : 0, actColor: col3(SIGNAL), labelT: 0, hub: lobe === 'thalamus', sx: 0, sy: 0, vis: true };
+        const pr = place.get(f.path), why = pr && pr.lobe ? pr.why : c.fallback ? 'nothing says where it goes: placed with its folder, in the least busy region' : 'nothing says where it goes: placed with the other notes in ' + c.folder;
+        const n = { path: f.path, name: f.basename, lobe, why, x, y, z, nx: nx0, ny: ny0, nz: nz0, deg: 0, adj: [], act: prev ? prev.act : 0, actColor: col3(SIGNAL), labelT: 0, hub: lobe === 'thalamus', sx: 0, sy: 0, vis: true };
         nodes.push(n); byPath.set(f.path, n);
       });
     }
@@ -1699,7 +1705,7 @@ class BrainView extends ItemView {
       e.preventDefault();
       const from = this.view.distT != null ? this.view.distT : this.view.dist;
       this.view.distT = Math.min(1200, Math.max(140, from * Math.exp(e.deltaY * 0.0012)));
-      this.lastInteract = performance.now();
+      this.lastInteract = this.userAt = performance.now();
     }, { passive: false });
     this.registerDomEvent(c, 'mousedown', (e) => {
       drag = { x: e.clientX, y: e.clientY, yaw: this.view.yaw, pitch: this.view.pitch, px: this.view.panX, py: this.view.panY, pan: e.button === 1 || e.shiftKey };
@@ -1716,7 +1722,7 @@ class BrainView extends ItemView {
           this.view.yaw = drag.yaw - dx * 0.0065;
           this.view.pitch = Math.max(-1.3, Math.min(1.35, drag.pitch + dy * 0.0065));
         }
-        this.lastInteract = performance.now();
+        this.lastInteract = this.userAt = performance.now();
       } else {
         const x = e.clientX - r.left, y = e.clientY - r.top;
         if ((this.frozen || (this.timeScale || 1) < 1) && !this.mini) {
@@ -1746,6 +1752,7 @@ class BrainView extends ItemView {
         if (h) { if (!this.frozen) this.setTimeScale(0); this.selSpike = h; this.needsDraw = true; this.openPanel({ kind: 'signal', h }); return; }
       }
       const n = this.screenToNode(x, y);
+      if (n && !n.learned && this.panel && this.panel.kind === 'notes') { this.focusNote(n); return; }
       if (n && !n.learned) { this.app.workspace.openLinkText(n.path, '', true); return; }
       if (n && n.learned) { this.openPanel({ kind: 'region', id: n.lobe }); this.flash(n.proj + '/' + n.file); return; }
       const b = this.labelBlocks.find(q => x >= q.x - 4 && x <= q.x + q.w + 4 && y >= q.top - 2 && y <= q.top + q.h);
@@ -2226,6 +2233,7 @@ class BrainView extends ItemView {
       else if (k === 'e') this.toggleUi('showEeg');
       else if (k === 'i') this.toggleInfo();
       else if (k === 'w') this.togglePanelKind('watch');
+      else if (k === 'd') this.togglePanelKind('notes');
       else if (k === 'u') this.togglePanelKind('usage');
       else if (k === '?') this.togglePanelKind('guide');
       else if (k === 'l') this.togglePop('layers');
@@ -2511,6 +2519,7 @@ class BrainView extends ItemView {
     const button = (r, label, fn, cta) => { const b = r.createEl('button', { cls: 'cb-p-btn' + (cta ? ' is-cta' : ''), text: label }); b.addEventListener('click', fn); return b; };
     const toRec = (r) => this.openPanel({ kind: 'signal', rec: r, tab: 'detail', back: Object.assign({}, this.panel) });
 
+    if (P.kind === 'notes') { this.renderNotesPanel(el, head, P, sec, row, title, (r, label, fn, cta) => button(r, label, fn, cta)); return; }
     if (P.kind === 'usage') {
       const R = p.usageNow();
       title('Use Claude Code better', 'What your own turns show, week by week, and what would make them go better: how you work with it, how you prompt, and what each project\'s CLAUDE.md could say. Worked out on this computer; nothing is sent anywhere.', '#7fdca4');
@@ -2616,6 +2625,7 @@ class BrainView extends ItemView {
       item('Use Claude Code better', 'From your own turns: commands you keep approving (with the rule to stop), claims without proof, untested changes, loops, a full context, where the money went. This week against the last.', 'Open', () => this.openPanel({ kind: 'usage', id: '', back: { kind: 'guide', id: '' } }), 'U');
       sec('Your vault', '');
       item('Notes as neurons', 'Every note is a neuron, every link an axon. A connection grows between files Claude uses one after the other; signals follow it.', '', null);
+      item('Find a note', 'Your notes by region, with search. Pick one: the brain turns to it and a signal runs along each of its links. Its type, tags or folder decide where it lives.', 'Notes', () => this.openPanel({ kind: 'notes', id: '' }), 'D');
       item('Look and layers', 'Atlas look (see-through brain), anatomy layers and MRI slices.', 'Change look', () => { this.closePanel(); this.setLook(p.settings.look === 'atlas' ? 'anatomy' : 'atlas'); }, 'V');
       sec('Try it all', '');
       item('Made-up sessions', 'Four sessions at once: reading notes, waiting for an approval, a workflow of agents, a loop.', 'Play demo', () => { this.closePanel(); p.runDemo(); });
@@ -3070,6 +3080,7 @@ class BrainView extends ItemView {
   }
   closePanel() {
     if (this.panel && this.panel.kind === 'session') this.focusSid = null;
+    if (this.panel && this.panel.kind === 'notes') this.clearNoteFocus();
     this.panel = null;
     this.panelEl.empty();
     this.applyLayout();
@@ -3081,7 +3092,7 @@ class BrainView extends ItemView {
   renderPanel(force) {
     const el = this.panelEl, P = this.panel, p = this.plugin, now = Date.now();
     if (!el || !P) return;
-    if (/^(setup|lessons|autopsy|compare|project|watch|guide|usage)$/.test(P.kind)) { if (!force && P._drawn) return; P._drawn = true; }
+    if (/^(setup|lessons|autopsy|compare|project|watch|guide|usage|notes)$/.test(P.kind)) { if (!force && P._drawn) return; P._drawn = true; }
     // the session panel refreshes as events come in, but not while you are pointing at it (a click would be lost)
     if (!force && P.kind === 'session' && this._panelHover) return;
     if (P.kind === 'signal') {
@@ -3118,7 +3129,7 @@ class BrainView extends ItemView {
       d.addEventListener('click', () => this.openPanel({ kind: 'signal', rec: r, tab: 'detail', back: Object.assign({}, this.panel) }));
     };
 
-    if (/^(setup|lessons|autopsy|compare|project|watch|guide|usage)$/.test(P.kind)) { this.renderExtraPanel(el, head, P, sec, row); return; }
+    if (/^(setup|lessons|autopsy|compare|project|watch|guide|usage|notes)$/.test(P.kind)) { this.renderExtraPanel(el, head, P, sec, row); return; }
     if (P.kind === 'session') {
       const s = p.sessions.get(P.id);
       const recs = p.history.filter(r => r.sid === P.id);
@@ -3682,6 +3693,149 @@ class BrainView extends ItemView {
   }
 
   // the four watchers, always in view: what is being watched, and how many things each one has caught
+  /* ---------- the notes view: your vault as neurons, found and followed along their own axons ---------- */
+
+  focusNote(n) {
+    if (!n) return;
+    this.noteFocus = { n, at: performance.now() };
+    if (this.dim.has(n.lobe)) { this.dim.delete(n.lobe); this.renderRegions(); }
+    const v = this.view; v.distT = Math.min(v.distT != null ? v.distT : v.dist, this.mini ? 260 : 340);
+    if (this.calm()) {   // reduce motion: turn there at once instead of gliding
+      const len = Math.hypot(n.x, n.y + 6, n.z) || 1;
+      v.yaw = Math.atan2(n.x, n.z); v.pitch = Math.max(-0.6, Math.min(0.9, Math.asin((n.y + 6) / len)));
+    }
+    this.showNoteLinks(n);
+    if (this.noteTimer) window.clearInterval(this.noteTimer);
+    // while it is picked, its axons keep carrying a slow, quiet signal so you can see where they go
+    this.noteTimer = window.setInterval(() => { if (this.noteFocus && this.noteFocus.n === n && this.panel && this.panel.kind === 'notes' && !this.frozen) this.showNoteLinks(n, true); }, 4000);
+    this.registerInterval(this.noteTimer);
+    if (this.panel && this.panel.kind === 'notes' && this.panel.path !== n.path) { this.panel.path = n.path; this.renderPanel(true); window.requestAnimationFrame(() => window.requestAnimationFrame(() => { if (this.panelEl) this.panelEl.scrollTop = 0; })); }
+    this.needsDraw = true;
+  }
+  clearNoteFocus() {
+    this.noteFocus = null;
+    if (this.noteTimer) { window.clearInterval(this.noteTimer); this.noteTimer = null; }
+  }
+  // the note lights up and a signal leaves along each of its connections, on the same axon paths as everything else
+  showNoteLinks(n, quiet) {
+    n.act = Math.max(n.act, quiet ? 0.55 : 1.1); n.actColor = col3('#ffffff'); n.firedAt = Date.now();
+    if (!quiet) { this.pulse(n, '#ffffff', 0.8, 9, 2.6); this.ping(n, '#ffffff'); }
+    const adj = n.adj.filter(e => e.n && !e.n.learned).sort((a, b) => b.n.deg - a.n.deg).slice(0, quiet ? 16 : 40);
+    adj.forEach((e, i) => window.setTimeout(() => {
+      if (!this.noteFocus || this.noteFocus.n !== n) return;
+      this.spark(e.l, n, '#bcd7ff', { hex: '#bcd7ff', str: quiet ? 0.3 : 0.5, ping: !quiet && i < 3 });
+    }, i * (quiet ? 90 : 55)));
+    this.needsDraw = true;
+  }
+  // Obsidian's own page preview when pointing at a note in the list (the plugin never reads the note itself)
+  notePreview(e, el, path) {
+    try { this.app.workspace.trigger('hover-link', { event: e, source: 'agent-brain', hoverParent: this, targetEl: el, linktext: path, sourcePath: '' }); } catch (err) { /* no preview */ }
+  }
+  renderNotesPanel(el, head, P, sec, row, title, button) {
+    const p = this.plugin, nodes = (this.nodes || []).filter(n => !n.learned);
+    title('Notes', 'Your vault as the brain holds it: each note is a neuron, each link an axon. Pick a note to see where it lives and what it connects to.', '#8ab4ff');
+    if (!nodes.length) { row('is-empty').setText('No notes to show yet. The brain is built from the Markdown notes in this vault.'); return; }
+    const count = {}; for (const n of nodes) count[n.lobe] = (count[n.lobe] || 0) + 1;
+    const lobeName = (k) => cap(LOBES[k].label.toLowerCase());
+    const noteRow = (parent, n, extra) => {
+      const r = parent.createDiv({ cls: 'cb-p-row is-click cb-n-row' + (P.path === n.path ? ' is-on' : '') });
+      const sw = r.createSpan({ cls: 'cb-n-dot' }); sw.style.background = LOBES[n.lobe] ? LOBES[n.lobe].color : '#888';
+      const tx = r.createSpan({ cls: 'cb-n-tx' });
+      tx.createSpan({ cls: 'cb-n-name', text: n.name });
+      const dir = n.path.includes('/') ? n.path.slice(0, n.path.lastIndexOf('/')) : '';
+      if (dir || extra) tx.createSpan({ cls: 'cb-n-dir', text: extra || dir });
+      r.createSpan({ cls: 'cb-p-t', text: n.deg ? String(n.deg) : '' }).setAttr('title', n.deg + (n.deg === 1 ? ' link' : ' links'));
+      r.setAttr('title', n.path + ' · click to find it in the brain');
+      r.addEventListener('click', () => this.focusNote(n));
+      r.addEventListener('mouseover', (e) => this.notePreview(e, r, n.path));
+      return r;
+    };
+
+    // the picked note: where it lives, why, and what it connects to
+    const sel = P.path && this.byPath && this.byPath.get(P.path);
+    if (sel && !sel.learned) {
+      const card = el.createDiv({ cls: 'cb-n-card' });
+      card.createDiv({ cls: 'cb-n-title', text: sel.name });
+      card.createDiv({ cls: 'cb-n-path', text: sel.path });
+      const where = card.createDiv({ cls: 'cb-n-where' });
+      const dot = where.createSpan({ cls: 'cb-n-dot' }); dot.style.background = LOBES[sel.lobe].color;
+      where.createSpan({ text: `${lobeName(sel.lobe)} · ${sel.why || ''}` });
+      const tools = card.createDiv({ cls: 'cb-f-act' });
+      button(tools, 'Open', () => this.app.workspace.openLinkText(sel.path, '', true), true);
+      button(tools, 'Show its links again', () => this.focusNote(sel));
+      button(tools, 'Clear', () => { P.path = ''; this.clearNoteFocus(); this.renderPanel(true); });
+      const nb = sel.adj.filter(e => e.n && !e.n.learned).map(e => e.n).filter((n, i, a) => a.indexOf(n) === i).sort((a, b) => b.deg - a.deg);
+      if (nb.length) {
+        card.createDiv({ cls: 'cb-n-sub', text: `Connected to ${nb.length} note${nb.length === 1 ? '' : 's'}` });
+        for (const n of nb.slice(0, 15)) noteRow(card, n, lobeName(n.lobe));
+        if (nb.length > 15) card.createDiv({ cls: 'cb-n-more', text: `and ${nb.length - 15} more` });
+      } else card.createDiv({ cls: 'cb-n-sub', text: 'No links to or from other notes.' });
+    }
+
+    // search
+    const input = el.createEl('input', { cls: 'cb-n-input', type: 'search' });
+    input.setAttr('placeholder', `Search ${nodes.length} notes by name or folder`);
+    input.value = P.q || '';
+    const list = el.createDiv({ cls: 'cb-n-list' });
+    const draw = () => {
+      list.empty();
+      const q = String(P.q || '').trim().toLowerCase();
+      if (q) {
+        const hits = nodes.filter(n => n.path.toLowerCase().includes(q))
+          .sort((a, b) => (b.name.toLowerCase().startsWith(q) ? 1 : 0) - (a.name.toLowerCase().startsWith(q) ? 1 : 0) || b.deg - a.deg);
+        list.createDiv({ cls: 'cb-p-sec' }).createSpan({ text: hits.length ? `${hits.length} found` : 'Nothing found' });
+        for (const n of hits.slice(0, 60)) noteRow(list, n, lobeName(n.lobe));
+        if (hits.length > 60) list.createDiv({ cls: 'cb-n-more', text: `Showing 60 of ${hits.length}. Type more to narrow it down.` });
+        return;
+      }
+      const hd = list.createDiv({ cls: 'cb-p-sec' }); hd.createSpan({ text: 'Regions' });
+      const vis = hd.createSpan({ cls: 'cb-n-vis' });
+      const showAll = vis.createEl('button', { cls: 'cb-n-link', text: 'show all' });
+      showAll.addEventListener('click', () => { this.dim.clear(); this.needsDraw = true; this.renderRegions(); draw(); });
+      const hideAll = vis.createEl('button', { cls: 'cb-n-link', text: 'dim all' });
+      hideAll.addEventListener('click', () => { for (const k of LOBE_ORDER) this.dim.add(k); this.needsDraw = true; this.renderRegions(); draw(); });
+      P.open = P.open || {};
+      for (const k of NOTE_LOBES.concat(['stem'])) {
+        if (!count[k]) continue;
+        const reg = list.createDiv({ cls: 'cb-n-reg' + (this.dim.has(k) ? ' is-dim' : '') });
+        const top = reg.createDiv({ cls: 'cb-p-row is-click cb-n-regh' });
+        const sw = top.createSpan({ cls: 'cb-swatch' }); sw.style.background = LOBES[k].color;
+        const tx = top.createSpan({ cls: 'cb-n-tx' });
+        tx.createSpan({ cls: 'cb-n-name', text: lobeName(k) });
+        if (NOTE_KINDS[k]) tx.createSpan({ cls: 'cb-n-dir', text: NOTE_KINDS[k] });
+        top.createSpan({ cls: 'cb-p-t', text: String(count[k]) });
+        const eye = top.createEl('button', { cls: 'cb-n-eye', text: this.dim.has(k) ? 'show' : 'dim' });
+        eye.setAttr('title', this.dim.has(k) ? 'Show this region in the brain' : 'Dim this region in the brain');
+        eye.addEventListener('click', (e) => { e.stopPropagation(); if (this.dim.has(k)) this.dim.delete(k); else this.dim.add(k); this.needsDraw = true; this.renderRegions(); draw(); });
+        top.addEventListener('click', () => { P.open[k] = !P.open[k]; draw(); });
+        if (!P.open[k]) continue;
+        const all = nodes.filter(n => n.lobe === k).sort((a, b) => b.deg - a.deg || a.name.localeCompare(b.name));
+        const lim = P.more && P.more[k] ? 400 : 12;
+        for (const n of all.slice(0, lim)) noteRow(reg, n);
+        if (all.length > lim) {
+          const m = reg.createEl('button', { cls: 'cb-n-link cb-n-more', text: `Show all ${all.length}` + (all.length > 400 ? ' (the first 400)' : '') });
+          m.addEventListener('click', () => { P.more = Object.assign({}, P.more, { [k]: true }); draw(); });
+        }
+      }
+      // why notes are where they are
+      const R = this.placement;
+      if (R) {
+        const d = list.createEl('details', { cls: 'cb-f-done cb-n-why' });
+        d.createEl('summary', { text: 'Why notes are where they are' });
+        d.createDiv({ cls: 'cb-n-help', text: 'A note goes where the first of these says: "lobe:" in its frontmatter, your own mappings (Settings), its type, kind or category, its tags, its folder, a dated name. A note that says nothing joins the other notes of its folder.' });
+        for (const [why, n] of Object.entries(R.reasons).sort((a, b) => b[1] - a[1])) { const r = d.createDiv({ cls: 'cb-p-row' }); r.createSpan({ cls: 'cb-p-x', text: why }); r.createSpan({ cls: 'cb-p-t', text: String(n) }); }
+        if (R.unmapped.length) {
+          d.createDiv({ cls: 'cb-n-sub', text: 'Types nothing maps yet' });
+          d.createDiv({ cls: 'cb-n-help', text: 'Map one in Settings → Agent Brain → Where notes go, with a line such as "type:wiki=occipital" (or "=sources").' });
+          for (const [k, n] of R.unmapped.slice(0, 12)) { const r = d.createDiv({ cls: 'cb-p-row' }); r.createSpan({ cls: 'cb-p-x', text: k }); r.createSpan({ cls: 'cb-p-t', text: n + (n === 1 ? ' note' : ' notes') }); }
+        }
+      }
+    };
+    input.addEventListener('input', () => { P.q = input.value; draw(); });
+    draw();
+    if (!P.path && !P.q) window.setTimeout(() => { try { input.focus({ preventScroll: true }); } catch (e) { /* */ } }, 30);
+  }
+
   // one card per incident: how much it asks of you, what happened in plain words, what to do, the evidence, and buttons
   renderIncidents(el, incs, o) {
     const p = this.plugin, NAME = { guard: 'Guard', shield: 'Shield', reality: 'Reality check', stuck: 'Stuck' };
@@ -3951,6 +4105,18 @@ class BrainView extends ItemView {
 
   // camera follows the most active lobe; hands control back after you drag, and resumes auto-rotate when things go quiet
   followCamera(dt, now) {
+    // a note picked in the notes view: turn until it faces you (however slowly the frames come), unless you take over
+    const F = this.noteFocus;
+    if (F && !F.there && now - F.at < 8000 && !((this.userAt || 0) > F.at)) {
+      const n = F.n, len = Math.hypot(n.x, n.y + 6, n.z) || 1;
+      const ty = Math.atan2(n.x, n.z), tp = Math.max(-0.6, Math.min(0.9, Math.asin((n.y + 6) / len)));
+      const e = 1 - Math.exp(-dt * 5), dy = angDiff(ty, this.view.yaw), dp = tp - this.view.pitch;
+      this.view.yaw += dy * e;
+      this.view.pitch += dp * e;
+      if (Math.abs(dy) < 0.004 && Math.abs(dp) < 0.004) F.there = true;
+      this.lastInteract = Math.max(this.lastInteract, now - 1000);   // and then stay put a while so it can be looked at
+      return true;
+    }
     if (!this.plugin.settings.follow || !this.regions) { this.focus = null; return false; }
     if (now - this.lastInteract < 8000) { this.focus = null; this.focusAt = now; return false; }
     let best = null, bv = 0.35;
@@ -4708,6 +4874,8 @@ class AgentBrainPlugin extends Plugin {
     this.registerView(VIEW_MINI, (leaf) => new BrainView(leaf, this, true));
     this.addRibbonIcon('brain-circuit', 'Agent Brain', () => this.activateView());
     this.addCommand({ id: 'open', name: 'Open Agent Brain view', callback: () => this.activateView() });
+    // pointing at a note in the notes view shows Obsidian's own page preview
+    if (typeof this.registerHoverLinkSource === 'function') this.registerHoverLinkSource('agent-brain', { display: 'Agent Brain', defaultMod: false });
     this.addCommand({ id: 'demo', name: 'Play demo session', callback: () => this.runDemo() });
     this.addCommand({ id: 'demo-catch', name: 'See it catch things (demo of guard, shield, reality check, stuck)', callback: () => this.runCatchDemo() });
     this.addCommand({ id: 'copy-hooks', name: 'Copy Claude Code hook config to clipboard', callback: () => this.copyHooks() });
@@ -4715,6 +4883,7 @@ class AgentBrainPlugin extends Plugin {
     this.addCommand({ id: 'open-mini', name: 'Open mini brain in the right sidebar', callback: () => this.activateMini() });
     this.addCommand({ id: 'daily-note', name: "Write and open today's activity note", callback: async () => { const p = await this.writeDailyNote(null, true); if (!p) new Notice('Agent Brain: no activity recorded today yet.'); } });
     this.addCommand({ id: 'session-note', name: 'Save the focused or latest session as a note', callback: async () => { const D = this.daily, sid = this.focusedSession(); const k = D && (D.sessions[sid] ? sid : Object.keys(D.sessions).sort((p, q) => D.sessions[q].last - D.sessions[p].last)[0]); const p = k && await this.writeSessionNote(k, true); if (!p) new Notice('Agent Brain: no session recorded today yet.'); } });
+    this.addCommand({ id: 'notes-view', name: 'Notes: find a note in the brain', callback: () => this.openPanelInView({ kind: 'notes', id: '' }) });
     this.addCommand({ id: 'copy-review', name: 'Copy a review summary of how you use Claude Code (numbers only)', callback: () => this.copyReview() });
     this.addCommand({ id: 'reset-learned', name: 'Forget learned connections', callback: () => this.resetLearned() });
     this.addCommand({ id: 'reset-engram', name: 'Clear the activity trace', callback: () => { this.resetEngram(); new Notice('Agent Brain: activity trace cleared.'); } });
@@ -6780,6 +6949,13 @@ class BrainSettingTab extends PluginSettingTab {
       .addToggle(t => t.setValue(this.plugin.settings.notifyGuard !== false).onChange(async (v) => { this.plugin.settings.notifyGuard = v; await save(); }));
     new Setting(containerEl).setName('Evidence').setDesc('Keeps what each turn rests on (files read, searches, pages, commands) and shows it under "Based on" when you click the finished turn. Marks a long answer about specific files when nothing was read or run.')
       .addToggle(t => t.setValue(this.plugin.settings.evidence !== false).onChange(async (v) => { this.plugin.settings.evidence = v; await save(); }));
+    let mapTimer = null;
+    new Setting(containerEl).setName('Where notes go').setDesc('Your own rules for placing notes in the brain, one per line, checked before the built-in ones: "type:wiki=occipital" (a frontmatter field and value), "tag:client=temporal", "folder:Wiki=occipital". After "=" put a region (frontal, motor, parietal, temporal, occipital, cerebellum, thalamus) or a kind of note (project, person, source, daily, concept, draft, index). "lobe: temporal" in a note\'s frontmatter always wins. The notes view (D) shows why each note is where it is.')
+      .addTextArea(t => { t.setPlaceholder('type:wiki=occipital\ntag:client=temporal\nfolder:Inbox=frontal').setValue(this.plugin.settings.noteMap || '').onChange((v) => {
+        this.plugin.settings.noteMap = v;
+        if (mapTimer) window.clearTimeout(mapTimer);
+        mapTimer = window.setTimeout(async () => { await save(); this.plugin.forEachView(w => w.scheduleRebuild && w.scheduleRebuild(0)); const bad = parseMappings(v).bad; if (bad.length) new Notice(`Agent Brain: ${bad.length} line${bad.length === 1 ? '' : 's'} not understood: ${bad.slice(0, 2).join(', ')}`); }, 800);
+      }); t.inputEl.rows = 4; });
     new Setting(containerEl).setName('Lessons').setDesc('Remembers short facts per project (the test command that works, a command that is not installed, a package that does not exist, a file it keeps editing from memory). Only program and file names are kept. Command palette: "Show lessons learned per project", to copy them into CLAUDE.md or a note.')
       .addToggle(t => t.setValue(this.plugin.settings.lessons !== false).onChange(async (v) => { this.plugin.settings.lessons = v; await save(); }));
     new Setting(containerEl).setName('Use Claude Code better').setDesc('Keeps one line of numbers per finished turn (durations, counts, cost, kinds of warnings, the first words of commands you approved, yes/no features of each prompt) for the "Use Claude Code better" panel: four weeks in detail, then weekly sums for a year. Never prompts, file contents or paths. Off: nothing new is recorded.')

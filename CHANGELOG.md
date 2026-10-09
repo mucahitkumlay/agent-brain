@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- **Notes view** (new dock button, or <kbd>D</kbd>, or *Notes: find a note in the brain* in the command palette). Your vault by region, with what kind of notes each holds and how many, and a search over note names and folders. Pick a note and the brain turns to it, the note lights up and a signal runs along each of its links on the same axon paths as everything else, so you see what it connects to; its neighbours are listed with their regions. *Open* opens it; pointing at a note in the list shows Obsidian's own page preview. While the view is open, clicking a neuron picks it instead of opening it. Regions can be dimmed one by one or all at once.
+- **Where notes go** follows the note, not only its folder: "lobe:" in the frontmatter, then your own rules (Settings → *Where notes go*: `type:wiki=occipital`, `tag:client=temporal`, `folder:Wiki=occipital`), then the note's `type`, `kind` or `category` (project, person, source, daily, concept, draft, index …), its tags, its folder, and a dated name for daily notes. A note that says nothing still joins the other notes of its folder, so a vault that has no types or tags looks as before. *Why notes are where they are*, at the end of the notes view, counts the reasons and lists the types nothing maps yet. Only what Obsidian's metadata cache already knows (frontmatter and tags) is used; note contents are never read.
+
 ## 0.17.1
 - The repository holds only the plugin and what builds, tests and releases it. The rules for changing the code (local only, watch never steer, one outgoing request, received content is data, nothing private on disk) are in CONTRIBUTING.md; security reports go through GitHub's *Report a vulnerability*. No change to the plugin itself.
 

@@ -9,6 +9,9 @@ Issues and pull requests are welcome.
 | `src/main.js` | the plugin: listener, session state, history, engram, telemetry, view (three.js) and HUD |
 | `src/anatomy.js` | atlas tables (AAL names, gyri per kind of work) and the meshes, tracts and MRI slice materials |
 | `src/intent.js` | what a shell, PowerShell or MCP call does (read, write, run, ops, web) |
+| `src/classify.js` | where a note goes in the brain and why (frontmatter, your mappings, types, tags, folders, names); pure |
+| `src/findings.js` | what a watcher finding means and what to do about it; pure |
+| `src/usage.js` | the "use it better" numbers, suggestions and the review summary; pure |
 | `src/fibre.js` | where a link between two notes runs (association fibre, real bundle or free curve), dendrites, terminal twigs; pure geometry |
 | `src/styles.css` | the HUD |
 | `scripts/` | server side: hook with offline queue, flush, link (heartbeat and body signals), installer template, tunnel launchers |

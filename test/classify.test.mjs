@@ -1,0 +1,24 @@
+// Where a note goes in the brain, and why: frontmatter, your mappings, types, tags, folders, names
+import * as C from '../src/classify.js';
+const ok = (c, m) => { if (!c) { console.log('FAIL', m); process.exitCode = 1; } else console.log('ok  ', m); };
+const note = (path, frontmatter, tags) => ({ path, basename: path.split('/').pop().replace(/\.md$/, ''), frontmatter, tags });
+let r = C.classifyNote(note('Inbox/Ali.md', { type: 'person' }), []);
+ok(r.lobe === 'temporal' && r.why === 'type: person', 'type: person -> temporal: ' + r.why);
+r = C.classifyNote(note('Projects/Ali.md', { lobe: 'occipital', type: 'person' }), []);
+ok(r.lobe === 'occipital' && r.why.startsWith('lobe:'), '"lobe:" always wins');
+r = C.classifyNote(note('x/Site.md', null, ['#project/website']), []);
+ok(r.lobe === 'frontal' && r.why === '#project/website', 'a nested tag counts by its first part');
+r = C.classifyNote(note('Daily/notes.md', null, []), []);
+ok(r.lobe === 'cerebellum' && r.why === 'folder Daily', 'folders still work: ' + r.why);
+r = C.classifyNote(note('misc/2026-10-09.md', null, []), []);
+ok(r.lobe === 'cerebellum' && r.why === 'a dated name', 'a dated name is a daily note');
+ok(C.classifyNote(note('misc/random.md', { type: 'wiki' }, []), []).lobe === null, 'an unknown type says nothing');
+const M = C.parseMappings('type:wiki=occipital\ntag:client=person\nfolder:Work/Clients=frontal\n# a comment\nnonsense\ntype:x=nowhere');
+ok(M.rules.length === 3 && M.bad.length === 2 && M.rules[1].lobe === 'temporal', 'mappings: regions or kinds after "=", bad lines reported, not guessed: ' + JSON.stringify(M.bad));
+ok(C.classifyNote(note('misc/random.md', { type: 'Wiki' }), M.rules).lobe === 'occipital', 'your mapping, case does not matter');
+ok(C.classifyNote(note('a/b.md', null, ['#client']), M.rules).why === 'your mapping tag:client=person', 'a tag mapping, with the line that matched');
+ok(C.classifyNote(note('Work/Clients/acme.md', { type: 'project' }), M.rules).why.startsWith('your mapping folder:'), 'your mappings come before the built-in words');
+ok(C.classifyNote(note('a/b.md', { type: ['source', 'project'] }), []).lobe === 'occipital', 'a list of types: the first known one');
+const R = C.placementReport([note('a/1.md', { type: 'wiki' }), note('a/2.md', { type: 'wiki' }), note('a/3.md', { type: 'person' }), note('Daily/4.md', null)].map(info => ({ info, result: C.classifyNote(info, []) })));
+ok(R.unplaced === 2 && R.lobes.temporal === 1 && R.lobes.cerebellum === 1 && R.unmapped[0][0] === 'type:wiki' && R.unmapped[0][1] === 2, 'the report counts where notes went and the types nothing maps: ' + JSON.stringify(R));
+ok(Object.keys(C.NOTE_KINDS).every(k => C.NOTE_LOBES.includes(k)), 'every region has a description');

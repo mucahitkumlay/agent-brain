@@ -27,6 +27,10 @@ no tokens.
   were corrected half as often"), and lines for each project's CLAUDE.md. Only numbers and yes/no features are kept,
   never prompts or file contents. **Copy for a review** puts those numbers on the clipboard as text, to paste into any
   chat for a second opinion; Agent Brain itself sends nothing.
+- **Notes view** (<kbd>D</kbd>). Your vault by region, with search. Pick a note: the brain turns to it and a signal runs
+  along each of its links, so you see where it lives and what it connects to. Notes are placed by their `type`, `kind`
+  or `category`, their tags, their folder or your own rules (`type:wiki=occipital` in the settings), and the view says
+  why each note is where it is.
 - **Labels in plain words.** The brain says *Reading, searching* or *Writing, editing*; the anatomical name is still there
   for those who want it.
 
@@ -192,6 +196,7 @@ Claude Code running on a remote machine reaches the plugin through a reverse SSH
 | <kbd>L</kbd> <kbd>M</kbd> <kbd>V</kbd> | Anatomy layers, MRI slice, look (anatomy or atlas) |
 | <kbd>F</kbd> <kbd>R</kbd> <kbd>H</kbd> <kbd>I</kbd> | Follow activity, reset view, hide everything, numbers and shortcuts |
 | <kbd>W</kbd> <kbd>U</kbd> <kbd>?</kbd> | Watchers, Use Claude Code better, what can I do here |
+| <kbd>D</kbd> | Notes: find a note in the brain |
 
 It adapts to the computer it runs on: it recognises the GPU, measures how long each frame takes and picks a resolution,
 antialiasing and frame rate that keep dragging and zooming smooth (the Info panel, <kbd>I</kbd>, shows what it chose).
@@ -228,7 +233,7 @@ The command palette has a demo (**Agent Brain: Play demo session**) if you want 
 | **Network** | One request per anatomy file, once: the download from this repository's anatomy release, checked by SHA-256. No telemetry, no analytics, no other servers. |
 | **Local server** | An HTTP listener on `127.0.0.1` only, so Claude Code's hooks can report to it. |
 | **Files outside the vault** (Node `fs`) | Used in one small function and for one file only: Claude Code's `settings.json` (in `~/.claude`, or in `CLAUDE_CONFIG_DIR` if you set it). The setup check reads it to tell you whether the hooks and telemetry are in place; *Install* reads it, keeps a backup next to it (`settings.json.agent-brain.bak`, the first one is never overwritten) and writes it. Nothing else outside the vault is read, listed, written or deleted. *Install* also removes an older copy of the hooks from this vault's own `.claude/settings*.json`, through Obsidian's file API. `test/invariants.test.js` fails if this changes. |
-| **Vault listing** (`getMarkdownFiles`) | The brain draws one neuron per note and one synapse per link, so the plugin lists your notes by path and reads the link graph Obsidian already keeps. It also uses the `lobe:` frontmatter Obsidian has already cached. It does not read note contents. Files are read in two places only: the plugin's own notes (daily and per session, to keep what you wrote under *My notes*), a replay you pick, and the vault's `.claude/settings*.json` that *Install* tidies. It writes only what you ask for: the optional daily note, the optional note per session, lessons notes, and replay files and pages (in the activity folder). |
+| **Vault listing** (`getMarkdownFiles`) | The brain draws one neuron per note and one synapse per link, so the plugin lists your notes by path and reads the link graph Obsidian already keeps. It also uses frontmatter (`lobe`, `type`, `kind`, `category`) and tags that Obsidian has already cached, to place notes. It does not read note contents. Files are read in two places only: the plugin's own notes (daily and per session, to keep what you wrote under *My notes*), a replay you pick, and the vault's `.claude/settings*.json` that *Install* tidies. It writes only what you ask for: the optional daily note, the optional note per session, lessons notes, and replay files and pages (in the activity folder). |
 | **Answers to Claude Code** | Empty, except with *Coach mode* on (off by default): then a finding may come back as context. Never a decision. |
 | **Clipboard** | Writes to it only when you press a *Copy* button (a path, a call id, the hook JSON, a lessons list, a turn report). Never reads it. |
 | **Code scanning** | Obsidian's directory scan lists the file, vault and clipboard access above because they are in the code. They are the minimum for hooks, a note-based map and Copy buttons, and the checks above are automated. Plugin builds are produced by GitHub Actions and carry build-provenance attestations. |
