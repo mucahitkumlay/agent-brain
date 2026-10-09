@@ -42,11 +42,15 @@ export function usageStats(turns) {
     cost: sum(turns, x => x.$),
     testedShare: coded.length ? pct(coded.filter(x => x.ts != null).length, coded.length) : null,
     stuck: turns.filter(x => x.st).length,
+    retriesPer10: n ? 10 * sum(turns, x => x.rt) / n : 0,
+    cacheShare: cacheShare(turns),
   };
 }
+// the share of the context read from the prompt cache, over the turns that have telemetry (null without)
+function cacheShare(turns) { const t = turns.filter(x => x.ch != null); return t.length ? sum(t, x => x.ch) / t.length : null; }
 
 // which way is better for each number (lower or higher)
-export const BETTER = { medianTurn: -1, waitShare: -1, failRate: -1, warnPer10: -1, costPerTurn: -1, testedShare: 1 };
+export const BETTER = { medianTurn: -1, waitShare: -1, failRate: -1, warnPer10: -1, costPerTurn: -1, testedShare: 1, retriesPer10: -1, cacheShare: 1 };
 
 const fmtMin = (ms) => { const m = Math.round(ms / 60000); return m < 1 ? 'under a minute' : m === 1 ? '1 minute' : `${m} minutes`; };
 
@@ -143,7 +147,16 @@ export function usageReport(list, now, opts) {
     how: 'Start such questions with "Read … first" or "Check in the code". The turn report shows what each answer rests on.',
   });
 
-  // 8. where the money went
+  // 8. context read again at full price
+  const cached = last14.filter(x => x.ch != null);
+  if (cached.length >= 10 && S.cacheShare < 0.5) tips.push({
+    id: 'cache', weight: Math.round(10 * (0.5 - S.cacheShare) * cached.length / 5) + 2,
+    title: 'Most of the context is read again at full price',
+    text: `Over ${cached.length} turns, ${Math.round(100 * S.cacheShare)}% of the context came from the cache; the rest was read again and billed in full.`,
+    how: 'The cache holds a conversation only for a short time and only for one model. Long pauses in the middle of a task and switching models empty it. Finish a task in one go, and start a new task with /clear instead of carrying an old, cold context.',
+  });
+
+  // 9. where the money went
   const pricey = last14.filter(x => x.$ > 0).sort((a, b) => b.$ - a.$).slice(0, 3);
   if (pricey.length && S.cost >= 1 && pricey[0].$ >= S.cost * 0.15) tips.push({
     id: 'cost', weight: 3,
@@ -183,12 +196,14 @@ export function promptFeatures(text) {
 
 export function weekOf(t) { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return +d; }
 
-const blank = () => ({ turns: 0, d: 0, w: 0, c: 0, f: 0, n: 0, $: 0, coded: 0, tested: 0, st: 0, full: 0, rx: 0, pr: 0, pf: {} });
+const blank = () => ({ turns: 0, d: 0, w: 0, c: 0, f: 0, n: 0, $: 0, coded: 0, tested: 0, st: 0, full: 0, rx: 0, pr: 0, pf: {}, rt: 0, chn: 0, chs: 0 });
 // add one turn to a week's sums (and to the prompt-feature buckets)
 export function addToWeek(W, x) {
   W.turns++; W.d += x.d || 0; W.w += x.w || 0; W.c += x.c || 0; W.f += x.f || 0; W.n += x.n || 0; W.$ += x.$ || 0;
   if (x.e > 0) { W.coded++; if (x.ts != null) W.tested++; }
   if (x.st) W.st++; if (x.cx >= 0.75) W.full++; if (x.rx) W.rx++;
+  W.rt = (W.rt || 0) + (x.rt || 0);
+  if (x.ch != null) { W.chn = (W.chn || 0) + 1; W.chs = (W.chs || 0) + x.ch; }
   if (x.pf) {
     W.pr++;
     for (const [k, v] of Object.entries(x.pf)) {
@@ -222,7 +237,7 @@ export function weekSeries(entries, weeks) {
     return { week: k, turns: W.turns, W,
       waitShare: W.d ? W.w / W.d : 0, failRate: W.c ? W.f / W.c : 0, warnPer10: W.turns ? 10 * W.n / W.turns : 0,
       costPerTurn: W.turns ? W.$ / W.turns : 0, testedShare: W.coded ? W.tested / W.coded : null, correctedShare: W.pr ? W.rx / W.pr : 0,
-      medianTurn: W.turns ? W.d / W.turns : 0 };
+      medianTurn: W.turns ? W.d / W.turns : 0, retriesPer10: W.turns ? 10 * (W.rt || 0) / W.turns : 0, cacheShare: W.chn ? W.chs / W.chn : null };
   });
 }
 
@@ -296,3 +311,71 @@ export function claudeMdDraft(proj, entries, lessons, hasClaudeMd) {
   if (!lines.length) return null;
   return { proj, has: !!hasClaudeMd, text: `## Notes from past sessions (Agent Brain)\n\n${lines.join('\n')}\n`, why, turns: E.length };
 }
+
+/* ---------- a summary to paste into a chat for a second opinion ---------- */
+
+// what a warning kind means, in words (the summary never carries the warning's own text)
+const KIND_WORDS = {
+  unproven: 'said it works without a passing test', contradicted: 'said it works after a failed test', ungrounded: 'answered without looking',
+  missing: 'reached for a file that is not there', mismatch: 'edited text that is not in the file', unread: 'edited a file without reading it',
+  unfound: 'used a name its own search did not find', nocommand: 'ran a command that does not exist', nomodule: 'used a missing module',
+  nopackage: 'installed a package that does not exist', noscript: 'ran an npm script that does not exist', nopath: 'pointed git at nothing',
+  nourl: 'fetched an address that does not exist',
+};
+const PF_WORDS = { f: 'named a file', d: 'said what done is', v: 'vague ("fix it")', r: 'a correction', x: 'set a limit' };
+
+// Built only from the recorded numbers: no prompt, reply, command line, file name, path or tool output is in there, so
+// nothing received from an agent is passed on. opts.anon replaces project names with "project 1", "project 2", …
+export function reviewDigest(entries, weeks, now, opts) {
+  const o = opts || {};
+  const recent = (entries || []).filter(x => x && x.t && now - x.t < 14 * DAY).sort((a, b) => a.t - b.t);
+  const R = usageReport(entries || [], now, o), series = weekSeries(entries || [], weeks || {}).filter(w => w.turns > 0), PT = promptTips(series);
+  const names = new Map(), proj = (p) => { if (!p) return '–'; if (!o.anon) return mdCell(p); if (!names.has(p)) names.set(p, 'project ' + (names.size + 1)); return names.get(p); };
+  const P = (v) => v == null ? '–' : Math.round(v * 100) + '%', $ = (v) => '$' + (v || 0).toFixed(2), min = (ms) => (ms / 60000).toFixed(1);
+  const L = [];
+  L.push('# How I work with a coding agent: numbers for a review', '');
+  L.push('These numbers were recorded on my computer while I worked with Claude Code (an AI coding agent). They contain no prompts, replies, code, command lines or file names: only durations, counts, costs, kinds of warnings, yes/no features of my prompts and the first words of commands I approved.', '');
+  L.push('Please look at them as a coach would: which two or three changes in how I work (how I prompt, when I step in, how I set up projects) would help most, what in the numbers makes you think so, and which numbers I should watch to see whether it helped. Say so when the numbers are too few to tell.', '');
+  const stats = (S) => [S.turns, min(S.medianTurn), P(S.waitShare), P(S.failRate), S.retriesPer10.toFixed(1), S.warnPer10.toFixed(1), P(S.testedShare), P(S.cacheShare), $(S.costPerTurn)];
+  L.push('## This week and the week before', '');
+  L.push('| | turns | median turn (min) | time the agent waited for me | failed tool calls | repeated failed calls per 10 turns | warnings per 10 turns | code changes tested | context from cache | cost per turn |');
+  L.push('|---|---|---|---|---|---|---|---|---|---|');
+  L.push('| this week | ' + stats(R.cur).join(' | ') + ' |');
+  L.push('| week before | ' + stats(R.prev).join(' | ') + ' |', '');
+  if (series.length > 1) {
+    L.push('## Week by week', '');
+    L.push('| week starting | turns | average turn (min) | waited for me | failed calls | answers I corrected | code changes tested | context from cache | cost per turn |');
+    L.push('|---|---|---|---|---|---|---|---|---|');
+    for (const w of series.slice(-12)) L.push(`| ${new Date(w.week).toISOString().slice(0, 10)} | ${w.turns} | ${min(w.medianTurn)} | ${P(w.waitShare)} | ${P(w.failRate)} | ${P(w.correctedShare)} | ${P(w.testedShare)} | ${P(w.cacheShare)} | ${$(w.costPerTurn)} |`);
+    L.push('');
+  }
+  if (recent.length) {
+    const rows = recent.slice(-60);
+    L.push(`## Turns of the last two weeks${rows.length < recent.length ? ` (the last ${rows.length} of ${recent.length})` : ''}`, '');
+    L.push('One row per turn (a prompt and everything the agent did until it stopped). Prompt: yes/no features of my prompt, never its text.', '');
+    L.push('| hours ago | project | min | waited (min) | tool calls | failed | repeated fails | files changed | tests at the end | context full | from cache | cost | warnings | prompt | next prompt corrected it |');
+    L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+    for (const x of rows) {
+      const pf = x.pf ? [x.pf.w === 0 ? 'short' : x.pf.w === 2 ? 'long' : 'medium'].concat(Object.keys(PF_WORDS).filter(k => x.pf[k]).map(k => PF_WORDS[k])).join(', ') : '–';
+      const kinds = (x.k || []).map(k => KIND_WORDS[k] || 'other').join('; ') || '–';
+      L.push(`| ${Math.round((now - x.t) / 3600000)} | ${proj(x.p)} | ${min(x.d || 0)} | ${min(x.w || 0)} | ${x.c || 0} | ${x.f || 0} | ${x.rt || 0} | ${x.e || 0} | ${x.ts == null ? 'none ran' : x.ts ? 'passed' : 'failed'} | ${P(x.cx || 0)} | ${P(x.ch)} | ${$(x.$)} | ${kinds} | ${pf} | ${x.rx ? 'yes' : 'no'} |`);
+    }
+    L.push('');
+  }
+  const ap = new Map();
+  for (const x of recent) for (const a of x.ap || []) if (a.o === 'a') ap.set(a.l, (ap.get(a.l) || 0) + 1);
+  if (ap.size) {
+    L.push('## What I approved by hand, two weeks', '');
+    for (const [l, n] of [...ap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)) L.push(`- ${mdCell(l)}: ${n} time${n === 1 ? '' : 's'}`);
+    L.push('');
+  }
+  const tips = R.tips.concat(PT.tips);
+  if (tips.length) {
+    L.push('## What a local tool already suggested', '');
+    for (const t of tips) L.push(`- ${t.title}`);
+    L.push('', 'Tell me if you see something these miss, or if one of them is wrong.', '');
+  }
+  return L.join('\n');
+}
+// a label inside a table: no pipes, no line breaks, no markup
+function mdCell(v) { return String(v).replace(/[|\r\n`*_<>\[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || '–'; }

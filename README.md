@@ -25,7 +25,8 @@ no tokens.
   "it works" without running the tests, lessons for the mistakes it repeats, /clear when the context keeps filling up.
   Week by week over everything recorded, prompting suggestions from how your own prompts went ("prompts that named a file
   were corrected half as often"), and lines for each project's CLAUDE.md. Only numbers and yes/no features are kept,
-  never prompts or file contents.
+  never prompts or file contents. **Copy for a review** puts those numbers on the clipboard as text, to paste into any
+  chat for a second opinion; Agent Brain itself sends nothing.
 - **Labels in plain words.** The brain says *Reading, searching* or *Writing, editing*; the anatomical name is still there
   for those who want it.
 
@@ -41,7 +42,11 @@ each one has caught. They only watch: nothing is ever stopped.
 | **Reality** | the agent believing something that is not so | a file that does not exist, "the build passes" after a failed build |
 | **Stuck** | a loop or a hang | the same command failing three times, no progress for 10 minutes |
 
-Click a watcher to see what it caught and the evidence. No findings yet? Click **See it catch things** (or run the
+Click a watcher to see what it caught. Each finding is a card that says how much it asks of you (*Needs you now*,
+*Worth a check*, *For the record*), what happened in plain words and what to do about it. Findings that belong together
+are one card: a web page that gave the agent orders, and everything it did right after. A card can copy a short message
+for you to paste into Claude Code ("Your last check failed. Run it again and paste the output…"), open the lessons for the
+project's CLAUDE.md, mark the finding as normal in that project, or be marked as done. No findings yet? Click **See it catch things** (or run the
 command *See it catch things* from the command palette): a short made-up session plays and all four fire, so you can see
 what they look like before they matter. These are hints, not proof.
 

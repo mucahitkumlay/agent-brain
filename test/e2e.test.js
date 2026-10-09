@@ -83,10 +83,12 @@ setTimeout(async () => {
     await new Promise(r => setTimeout(r, 1600));
     await send({ hook_event_name: 'SessionStart', session_id: 'S2' });
     await send({ hook_event_name: 'UserPromptSubmit', session_id: 'S2', prompt: 'add a discount' });
+    p.onOtel('api_request', { 'session.id': 'S2', input_tokens: 100, cache_read_tokens: 300, cache_creation_tokens: 0, output_tokens: 10 }, Date.now(), 'local');
     await send({ hook_event_name: 'Stop', session_id: 'S2' });
     const u2 = p.usage[p.usage.length - 1];
     await send({ hook_event_name: 'SessionStart', session_id: 'S3' });
     await send({ hook_event_name: 'UserPromptSubmit', session_id: 'S3', prompt: 'no, revert the discount' });
+    T('9e usage: the share of the context in a turn read from the cache, and failed calls tried again', u2.ch === 0.75 && typeof u2.rt === 'number' && (u.ch === null || typeof u.ch === 'number'), JSON.stringify(u2));
     T('9c a correction in a continued session (new id, same project) marks the turn it corrects', u2.rx === 1, JSON.stringify(u2));
     T('9b usage: one entry per turn, approvals with their rule, prompt features, the correction marks it, no prompt text', (p.usage || []).length > before && u.ap.length === 2 && u.ap[0].r === 'Bash(npm test:*)' && u.ap[0].o === 'a' && u.pf && u.pf.d === 1 && u.rx === 1 && !JSON.stringify(p.usage).includes('make sure they pass') && !JSON.stringify(p.usage).includes('revert'), JSON.stringify(u)); }
   { const proj = [...p.sessions.values()].find(x => x.id === 'S').project;

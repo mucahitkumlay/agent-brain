@@ -13,7 +13,8 @@ import { INSTALL_SH } from './scripts.js';
 import { REPO, ASSET_RELEASE, ASSETS } from './generated.js';
 import { bashCategory, bashParts, psCategory, mcpCategory, shellTargets } from './intent.js';
 import { riskyCommand, riskyScript, findSecrets, maskSecrets, UNTRUSTED_TOOLS, sensitivePath, egressCommand, secretDump, persistence, injectionText, lessonFor, agentToHook, scrubReplay, programOf, claimsOf, costCompare, muteKey, budgetHits, noteName, mdText, replayHtml, TEST_CMD, TESTS_ONLY, THEMES } from './insight.js';
-import { approvalRule, usageReport, BETTER, promptFeatures, foldOld, weekSeries, promptTips, claudeMdDraft } from './usage.js';
+import { explainFinding, incidents, LEVELS } from './findings.js';
+import { approvalRule, usageReport, BETTER, promptFeatures, foldOld, weekSeries, promptTips, claudeMdDraft, reviewDigest } from './usage.js';
 import { makeSurfaceIndex, makeEndIndex, settle, routeLink, linkPoint, twigs, dendrites, LINK_SEGMENTS } from './fibre.js';
 import { AAL, AAL_LOBE, GYRI, aalName, bundleName, parseAal, parseInner, parseT1, parseTracts, makeInner, makeTracts, makeSlice } from './anatomy.js';
 
@@ -33,7 +34,7 @@ const DEFAULTS = {
   traceMinutes: 90, vitals: true, showVitals: true,
   telemetry: true, notifyStuck: true, dream: true, showEeg: false, hintFreeze: false, callDetails: true, look: 'anatomy', realityCheck: true, notifyReality: true,
   guard: true, shield: true, notifyGuard: true, evidence: true, lessons: true, theme: 'night', coach: false, setupSeen: false,
-  reduceMotion: 'auto', signalStyle: 'real', budgetSession: 0, budgetDay: 0, sessionNote: false,
+  reduceMotion: 'auto', signalStyle: 'real', budgetSession: 0, budgetDay: 0, sessionNote: false, reviewAnon: false,
 };
 // "who": one color per session. Chosen to stay apart from the lobe colors ("what").
 const SESSION_COLORS = ['#7fe0c2', '#c3a6ff', '#7cc4ff', '#f59ac0', '#b6e388', '#dfe6f2'];
@@ -2522,13 +2523,13 @@ class BrainView extends ItemView {
       } else {
         // week by week, every week recorded
         sec('Week by week', `${series.length} week${series.length === 1 ? '' : 's'}, ${total} turns`);
-        const fmt = { turns: v => String(v), medianTurn: v => fmtDur(v), waitShare: v => Math.round(v * 100) + '%', failRate: v => Math.round(v * 100) + '%', correctedShare: v => Math.round(v * 100) + '%', warnPer10: v => v.toFixed(1), costPerTurn: v => '$' + v.toFixed(2), testedShare: v => v == null ? '–' : Math.round(v * 100) + '%' };
-        const names = { turns: 'Turns', medianTurn: 'Average turn', waitShare: 'Time it waited for you', failRate: 'Tool calls that failed', correctedShare: 'Answers you had to correct', warnPer10: 'Warnings per 10 turns', costPerTurn: 'Cost per turn', testedShare: 'Code changes that were tested' };
+        const fmt = { turns: v => String(v), medianTurn: v => fmtDur(v), waitShare: v => Math.round(v * 100) + '%', failRate: v => Math.round(v * 100) + '%', correctedShare: v => Math.round(v * 100) + '%', warnPer10: v => v.toFixed(1), costPerTurn: v => '$' + v.toFixed(2), testedShare: v => v == null ? '–' : Math.round(v * 100) + '%', retriesPer10: v => v.toFixed(1), cacheShare: v => v == null ? '–' : Math.round(v * 100) + '%' };
+        const names = { turns: 'Turns', medianTurn: 'Average turn', waitShare: 'Time it waited for you', failRate: 'Tool calls that failed', correctedShare: 'Answers you had to correct', warnPer10: 'Warnings per 10 turns', costPerTurn: 'Cost per turn', testedShare: 'Code changes that were tested', retriesPer10: 'Failed calls tried again, per 10 turns', cacheShare: 'Context read from the cache' };
         const dir = Object.assign({ turns: 0, correctedShare: -1 }, BETTER);
         for (const k of Object.keys(names)) {
           const vals = series.map(w => w[k]);
           if (k === 'costPerTurn' && !vals.some(v => v > 0)) continue;
-          if (k === 'testedShare' && !vals.some(v => v != null)) continue;
+          if ((k === 'testedShare' || k === 'cacheShare') && !vals.some(v => v != null)) continue;
           const r = row('cb-u-row');
           r.createSpan({ cls: 'cb-p-x', text: names[k] });
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2574,6 +2575,16 @@ class BrainView extends ItemView {
           }
         }
       }
+      // a second opinion: the same numbers as text, to paste into any chat; nothing is sent from here
+      if (total >= 5) {
+        sec('A second opinion', '');
+        row('is-empty').setText('Copies these numbers as text, with a short request for a review, to paste into a chat with any assistant. Only numbers: no prompts, replies, code, command lines or file names. Read it before you paste it; Agent Brain sends nothing itself.' + (p.settings.reviewAnon ? ' Project names are hidden.' : ' Project names are included (Settings: "Review summary: hide project names").'));
+        const box = el.createDiv({ cls: 'cb-u-tip' });
+        const r = box.createDiv();
+        button(r, 'Copy for a review', async () => { if (await p.copyReview()) this.flash('Copied: paste it into a chat'); }, true);
+        const show = button(r, 'Show what it contains', () => { if (pre) { pre.remove(); pre = null; show.setText('Show what it contains'); } else { pre = box.createEl('pre', { cls: 'cb-u-code', text: p.reviewText() }); show.setText('Hide'); } });
+        let pre = null;
+      }
       row('is-empty').setText('Kept: one line of numbers per turn for four weeks, then one line of sums per week for a year (durations, counts, cost, kinds of warnings, the first words of commands you approved, and yes/no features of each prompt such as "named a file"). Never the prompts themselves, file contents or paths.');
       return;
     }
@@ -2612,40 +2623,39 @@ class BrainView extends ItemView {
       return;
     }
     if (P.kind === 'watch') {
-      title('Watchers', 'Four checks that run while Claude works. They only watch: nothing is stopped, and nothing leaves your computer.', '#8ab4ff');
+      title('Watchers', 'What looked wrong in your sessions, and what you can do about it. Nothing was stopped: you decide.', '#8ab4ff');
+      backBtn();
       const W = [
-        { k: 'guard', name: 'Guard', color: GUARD, key: 'guard', does: 'Notices commands that destroy things (rm -rf, git push --force, DROP TABLE, curl | sh) and secrets written out in the open (tokens, passwords).', why: 'So you hear about a risky step as it happens, not after the damage.' },
-        { k: 'shield', name: 'Injection shield', color: GUARD, key: 'shield', does: 'Notices when something Claude read from outside (a web page, a search result) talks to it, and what it does right after: reading credentials, sending data out, changing startup files.', why: 'A web page can try to give the agent orders. This shows when it may have worked.' },
-        { k: 'reality', name: 'Reality check', color: DOUBT, key: 'realityCheck', does: 'Notices when the agent believes something that is not so: a file or package that does not exist, text it tries to change that is not there, "the tests pass" after a failing run.', why: 'Agents sound sure even when they are wrong. This points at the evidence.' },
-        { k: 'stuck', name: 'Stuck', color: ERR, key: null, does: 'Notices a loop or a hang: the same command failing again and again, a command running for 20 minutes, or no progress for 10.', why: 'A stuck agent can burn time and money while you are away.' },
+        { k: 'guard', name: 'Guard', key: 'guard', does: 'Commands that destroy things (rm -rf, git push --force, DROP TABLE) and keys or passwords written out in the open.' },
+        { k: 'shield', name: 'Shield', key: 'shield', does: 'A web page or download that tries to give the agent orders, and what the agent does right after.' },
+        { k: 'reality', name: 'Reality check', key: 'realityCheck', does: 'The agent believing something that is not so: a file that is not there, "the tests pass" when they did not.' },
+        { k: 'stuck', name: 'Stuck', key: null, does: 'The same command failing again and again, a command running for 20 minutes, or no progress for 10.' },
       ];
-      const order = P.id ? [W.find(w => w.k === P.id), ...W.filter(w => w.k !== P.id)].filter(Boolean) : W;
-      const sessions = [...p.sessions.values()];
-      for (const w of order) {
-        const on = w.key ? p.settings[w.key] !== false : true;
-        const found = [];
-        if (w.k === 'stuck') for (const s of sessions) { if (s.alarm) found.push({ s, t: s.alarm.since, text: s.alarm.text, stuck: true }); }
-        else for (const s of sessions) for (const f of s.reality || []) if ((f.group || 'reality') === w.k) found.push({ s, t: f.t, text: f.text, f });
-        found.sort((a, b) => b.t - a.t);
-        sec(w.name, !on ? 'off' : found.length ? `${found.length} caught` : 'watching, nothing yet');
-        { const d = row('is-empty'); d.setText(w.does); d.style.color = 'var(--cb-ink)'; }
-        row('is-empty').setText(w.why);
-        for (const x of found.slice(0, 5)) {
-          const r = row('cb-p-ev cb-p-doubt is-click' + (w.k === 'stuck' ? '' : ' is-' + w.k));
-          r.createSpan({ cls: 'cb-p-t', text: hhmm(x.t, true) });
-          r.createSpan({ cls: 'cb-p-x', text: p.sessionLabel(x.s) + (p.isDemo(x.s) ? ' (demo)' : '') + ': ' + x.text });
-          r.setAttr('title', x.stuck ? 'Open the session' : 'Show the evidence');
-          r.addEventListener('click', () => {
-            const ev = x.f && (x.f.ref ? this.findRec(x.s.id, y => y.e === 'PreToolUse' && y.id === x.f.ref) : this.findRec(x.s.id, y => y.e === 'Doubt' && y.text === x.f.text));
-            if (ev) this.openPanel({ kind: 'signal', rec: ev, tab: 'detail', back: Object.assign({}, this.panel) });
-            else this.openPanel({ kind: 'session', id: x.s.id, back: Object.assign({}, this.panel) });
-          });
-        }
-        if (w.key) { const r = row(''); button(r, on ? 'Turn off' : 'Turn on', async () => { p.settings[w.key] = !on; await p.saveAll(); this.renderPanel(true); if (this.renderHud) this.renderHud(); }); }
+      const all = p.findingIncidents([...p.sessions.values()]);
+      const only = W.find(w => w.k === P.id);
+      const list = only ? all.filter(x => x.group === only.k) : all;
+      if (only) { const r = row('cb-f-filter'); r.createSpan({ text: `Only ${only.name}` }); button(r, 'Show all', () => this.openPanel({ kind: 'watch', id: '' })); }
+      const open = list.filter(x => !x.seen), done = list.filter(x => x.seen);
+      if (!open.length) row('cb-f-quiet').setText(list.length ? 'Nothing left to look at. Everything here is marked as done.' : 'All quiet. When something looks wrong, it shows up here with what you can do about it.');
+      for (const lv of ['act', 'check', 'note']) {
+        const L = open.filter(x => x.level === lv);
+        if (!L.length) continue;
+        sec(LEVELS[lv].name, String(L.length)).addClass('cb-f-sec-' + lv);
+        this.renderIncidents(el, L, { grouped: true });
       }
-      sec('Try it', '');
-      row('is-empty').setText('Plays a made-up session in which the agent does something risky, reads a poisoned page, believes something false and gets stuck.');
-      button(row(''), 'See it catch things', () => p.runCatchDemo(), true);
+      if (open.length > 1) button(row(''), 'Mark all as done', () => { for (const x of open) this.markIncident(x); this.renderPanel(true); });
+      if (done.length) { const d = el.createEl('details', { cls: 'cb-f-done' }); d.createEl('summary', { text: `Done (${done.length})` }); this.renderIncidents(d, done, {}); }
+      sec('The four watchers', '');
+      for (const w of W) {
+        const on = w.key ? p.settings[w.key] !== false : true, n = all.filter(x => x.group === w.k && !x.seen).length;
+        const r = row('cb-f-w' + (on ? '' : ' is-off'));
+        const tx = r.createDiv({ cls: 'cb-f-wt' });
+        tx.createDiv({ cls: 'cb-f-wn', text: w.name + (on ? (n ? ` · ${n} open` : '') : ' · off') });
+        tx.createDiv({ cls: 'cb-f-wd', text: w.does });
+        if (w.key) button(r, on ? 'Turn off' : 'Turn on', async () => { p.settings[w.key] = !on; await p.saveAll(); this.renderPanel(true); if (this.renderHud) this.renderHud(); });
+      }
+      row('is-empty').setText('They only watch: nothing is ever stopped, and nothing leaves your computer. "Copy a message for Claude" puts a short note on the clipboard for you to paste into Claude Code if you want to.');
+      button(row(''), 'See it catch things (demo)', () => p.runCatchDemo());
       return;
     }
     if (P.kind === 'setup') {
@@ -3117,23 +3127,14 @@ class BrainView extends ItemView {
       const dot = title.createSpan({ cls: 'cb-p-dot' }); dot.style.background = color;
       const nm = title.createSpan({ text: s ? p.sessionLabel(s) : (recs[0] && recs[0].label) || 'session' }); nm.style.color = color;
       head.createDiv({ cls: 'cb-p-sub', text: s ? `${s.wait && s.wait.kind === 'approval' ? 'Needs your approval' : cap(s.state)} for ${p.isLive(s) || (s.wait && s.wait.kind === 'approval') ? fmtDur(now - (s.wait ? s.wait.since : s.since)) : fmtAgo(now - s.at)}, on ${s.src === 'local' || !s.src ? 'this computer' : s.src}` : 'This session has ended.' });
-      if (s && s.alarm) {
-        sec('May be stuck', fmtAgo(now - s.alarm.since) + ' ago');
-        const r = row('cb-p-alarm'); r.createSpan({ cls: 'cb-p-x', text: s.alarm.text });
-        const b = r.createEl('button', { cls: 'cb-p-btn', text: 'Dismiss' }); b.addEventListener('click', () => { p.clearAlarm(s); this.renderPanel(); });
-      }
-      for (const g of ['guard', 'shield', 'reality']) {
-        const list = s && s.reality ? s.reality.filter(f => (f.group || 'reality') === g) : [];
-        if (!list.length) continue;
-        sec(FINDING[g].name, `${list.length} finding${list.length === 1 ? '' : 's'}`);
-        for (const f of list.slice(-8).reverse()) {
-          const r = row('cb-p-ev cb-p-doubt is-' + g + (f.important ? ' is-important' : ''));
-          r.createSpan({ cls: 'cb-p-t', text: hhmm(f.t, true) });
-          r.createSpan({ cls: 'cb-p-x', text: f.text });
-          const ev = f.ref ? this.findRec(s.id, x => x.e === 'PreToolUse' && x.id === f.ref) : this.findRec(s.id, x => x.e === 'Doubt' && x.text === f.text);
-          if (ev) { r.addClass('is-click'); r.setAttr('title', 'Show the evidence'); r.addEventListener('click', () => this.openPanel({ kind: 'signal', rec: ev, tab: 'detail', back: Object.assign({}, this.panel) })); }
+      if (s) {
+        const incs = p.findingIncidents([s]), open = incs.filter(x => !x.seen);
+        if (incs.length) {
+          sec('Watchers', open.length ? `${open.length} open` : 'all done');
+          this.renderIncidents(el, open, { session: false });
+          const done = incs.filter(x => x.seen);
+          if (done.length) { const d = el.createEl('details', { cls: 'cb-f-done' }); d.createEl('summary', { text: `Done (${done.length})` }); this.renderIncidents(d, done, { session: false }); }
         }
-        row('is-empty').setText({ guard: 'Destructive commands and secrets in the open. Agent Brain only watches: nothing was stopped.', shield: 'Untrusted content followed by a step an attacker would want. A hint, not proof: check what it read.', reality: 'Signs that what the agent believed and what was really there differ. They are hints, not proof: check the evidence.' }[g]);
       }
       const rep = s && s.reports && s.reports[s.reports.length - 1];
       if (rep) { sec('Last turn', `${fmtDur(rep.dur)}, ${fmtAgo(now - rep.t1)} ago`); this.renderReport(el, rep, row, P.id); }
@@ -3681,36 +3682,76 @@ class BrainView extends ItemView {
   }
 
   // the four watchers, always in view: what is being watched, and how many things each one has caught
+  // one card per incident: how much it asks of you, what happened in plain words, what to do, the evidence, and buttons
+  renderIncidents(el, incs, o) {
+    const p = this.plugin, NAME = { guard: 'Guard', shield: 'Shield', reality: 'Reality check', stuck: 'Stuck' };
+    for (const x of incs) {
+      const s = p.sessions.get(x.sid), X = x.explain, demo = !!s && p.isDemo(s);
+      const c = el.createDiv({ cls: `cb-f is-${x.level}` + (x.seen ? ' is-seen' : '') });
+      const top = c.createDiv({ cls: 'cb-f-top' });
+      if (!o.grouped) top.createSpan({ cls: 'cb-f-lv', text: LEVELS[x.level].name });
+      top.createSpan({ cls: 'cb-f-meta', text: [o.session !== false && s ? p.sessionLabel(s) + (demo ? ' (demo)' : '') : demo ? 'demo' : '', hhmm(x.t, true), NAME[x.group], x.repeat > 1 ? `${x.repeat} times` : ''].filter(Boolean).join(' · ') });
+      c.createDiv({ cls: 'cb-f-title', text: X.title });
+      if (x.steps.length) {
+        c.createDiv({ cls: 'cb-f-what', text: `After reading ${x.source || 'outside content'}:` });
+        const ul = c.createEl('ul', { cls: 'cb-f-steps' });
+        for (const st of x.steps) ul.createEl('li', { text: st });
+      } else if (X.what) c.createDiv({ cls: 'cb-f-what', text: cap(X.what) + '.' });
+      else if (x.group === 'stuck') c.createDiv({ cls: 'cb-f-what', text: x.items[0].text + '.' });
+      const todo = c.createDiv({ cls: 'cb-f-todo' }); todo.createSpan({ cls: 'cb-f-k', text: 'What to do: ' }); todo.createSpan({ text: X.todo });
+      if (x.group !== 'stuck') {
+        const det = c.createEl('details', { cls: 'cb-f-ev' });
+        det.createEl('summary', { text: x.items.length > 1 ? `What the watcher saw (${x.items.length})` : 'What the watcher saw' });
+        for (const f of x.items.slice().reverse().slice(0, 6)) {
+          const r = det.createDiv({ cls: 'cb-f-evr' });
+          r.createSpan({ cls: 'cb-p-t', text: hhmm(f.t, true) }); r.createSpan({ text: f.text });
+          const ev = f.ref ? this.findRec(x.sid, y => y.e === 'PreToolUse' && y.id === f.ref) : this.findRec(x.sid, y => y.e === 'Doubt' && y.text === f.text);
+          if (ev) { r.addClass('is-click'); r.setAttr('title', 'Open that call'); r.addEventListener('click', () => this.openPanel({ kind: 'signal', rec: ev, tab: 'detail', back: Object.assign({}, this.panel) })); }
+        }
+      }
+      const act = c.createDiv({ cls: 'cb-f-act' });
+      const btn = (label, fn, cta, tip) => { const b = act.createEl('button', { cls: 'cb-p-btn' + (cta ? ' is-cta' : ''), text: label }); if (tip) b.setAttr('title', tip); b.addEventListener('click', fn); return b; };
+      if (X.msg) btn('Copy a message for Claude', () => { navigator.clipboard.writeText(X.msg); this.flash('Copied: paste it into Claude Code'); }, !x.seen, 'Puts this on the clipboard, for you to paste into Claude Code: "' + X.msg + '"');
+      if (X.lesson) { const proj = s && (p.lessons || {})[s.project || ''] ? s.project : ''; btn('Lessons for CLAUDE.md', () => this.openPanel({ kind: 'lessons', id: proj, back: Object.assign({}, this.panel) }), false, 'What past turns taught about this project, ready to copy into its CLAUDE.md'); }
+      if (s && !demo && (x.group === 'guard' || x.group === 'reality')) btn('Normal in this project', () => { p.muteFinding(s.project || '', x.items[0]); this._watchSig = ''; this.renderPanel(true); }, false, `Stop raising findings like this one in ${s.project || 'this project'}. You can undo it in the settings.`);
+      if (!x.seen) btn('Done', () => { this.markIncident(x); this.renderPanel(true); }, false, 'Mark it as handled. It moves to "Done".');
+    }
+  }
+  markIncident(x) {
+    const s = this.plugin.sessions.get(x.sid);
+    if (x.group === 'stuck') { if (s) this.plugin.clearAlarm(s); } else for (const f of x.items) f.seen = true;
+    this._watchSig = ''; if (this.requestHud) this.requestHud();
+  }
   renderWatch(list) {
     const W = this.watchEl; if (!W) return;
     const p = this.plugin, st = p.settings;
-    const cnt = { guard: 0, shield: 0, reality: 0 }, latest = {};
-    for (const s of list) for (const f of s.reality || []) { const g = f.group || 'reality'; if (!(g in cnt)) continue; cnt[g]++; if (!latest[g] || f.t > latest[g].f.t) latest[g] = { s, f }; }
-    const stuck = list.filter(s => s.alarm);
+    // what is still open, per watcher and per level (done and muted ones do not count)
+    const open = p.findingIncidents(list).filter(x => !x.seen), cnt = { guard: 0, shield: 0, reality: 0, stuck: 0 }, lv = { act: 0, check: 0, note: 0 };
+    for (const x of open) { cnt[x.group]++; lv[x.level]++; }
     const items = [
-      { k: 'guard', name: 'Guard', on: st.guard !== false, n: cnt.guard, hit: latest.guard && latest.guard.s, tip: 'Destructive commands and secrets in the open. It only watches: nothing is stopped.' },
-      { k: 'shield', name: 'Shield', on: st.shield !== false, n: cnt.shield, hit: latest.shield && latest.shield.s, tip: 'Untrusted content (a web page, a search result) followed by a step an attacker would want.' },
-      { k: 'reality', name: 'Reality', on: st.realityCheck !== false, n: cnt.reality, hit: latest.reality && latest.reality.s, tip: 'Signs that the agent believes something that is not so: a file that does not exist, "the tests pass" after a failing run.' },
-      { k: 'stuck', name: 'Stuck', on: true, n: stuck.length, hit: stuck[0], tip: 'The same command failing again and again, a command running for 20 minutes, or no progress for 10.' },
+      { k: 'guard', name: 'Guard', on: st.guard !== false, n: cnt.guard, tip: 'Destructive commands and secrets in the open. It only watches: nothing is stopped.' },
+      { k: 'shield', name: 'Shield', on: st.shield !== false, n: cnt.shield, tip: 'A web page or download that tries to give the agent orders, and what it does right after.' },
+      { k: 'reality', name: 'Reality', on: st.realityCheck !== false, n: cnt.reality, tip: 'The agent believing something that is not so: a file that does not exist, "the tests pass" after a failing run.' },
+      { k: 'stuck', name: 'Stuck', on: true, n: cnt.stuck, tip: 'The same command failing again and again, a command running for 20 minutes, or no progress for 10.' },
     ];
     const total = items.reduce((a, x) => a + (x.on ? x.n : 0), 0);
     // rebuild only when something changed: a button that is replaced between mouse down and mouse up loses the click
-    const sig = items.map(x => (x.on ? 1 : 0) + ':' + x.n).join('|') + (list.some(s => p.isDemo(s)) ? 'd' : '') + (list.length ? 's' : '');
+    const sig = items.map(x => (x.on ? 1 : 0) + ':' + x.n).join('|') + '/' + lv.act + ':' + lv.check + (list.some(s => p.isDemo(s)) ? 'd' : '') + (list.length ? 's' : '');
     if (sig === this._watchSig) return;
     this._watchSig = sig; W.empty();
     W.setAttr('role', 'group'); W.setAttr('aria-label', 'Watchers: guard, shield, reality check, stuck');
     const hd = W.createEl('button', { cls: 'cb-w-h' });
     hd.createSpan({ cls: 'cb-w-ht', text: 'Watchers' });
     const demo = list.some(s => p.isDemo(s) && (s.reality || s.alarm));
-    hd.createSpan({ cls: 'cb-w-hs', text: (demo ? 'demo · ' : '') + (total ? `${total} caught · what is this?` : 'all quiet · what is this?') });
-    hd.setAttr('title', 'Four checks that run while Claude works and tell you when something looks wrong. They only watch: nothing is stopped. Click for what each one does.');
+    hd.createSpan({ cls: 'cb-w-hs' + (lv.act ? ' is-act' : lv.check ? ' is-check' : ''), text: (demo ? 'demo · ' : '') + (lv.act ? `${lv.act} need${lv.act === 1 ? 's' : ''} you` : lv.check ? `${lv.check} to check` : total ? `${total} to look at` : 'all quiet') + ' ›' });
+    hd.setAttr('title', 'Four checks that run while Claude works and tell you when something looks wrong, with what you can do. They only watch: nothing is stopped. Click to open them.');
     hd.addEventListener('click', () => this.openPanel({ kind: 'watch', id: '' }));
     for (const it of items) {
       const b = W.createEl('button', { cls: 'cb-w cb-w-' + it.k + (!it.on ? ' is-off' : it.n ? ' is-hit' : '') });
       b.createSpan({ cls: 'cb-w-dot' });
       b.createSpan({ cls: 'cb-w-n', text: it.name });
       if (it.on && it.n) b.createSpan({ cls: 'cb-w-c', text: String(it.n) });
-      const state = !it.on ? 'off (Settings)' : it.n ? `${it.n} caught` : 'watching';
+      const state = !it.on ? 'off (Settings)' : it.n ? `${it.n} open` : 'watching';
       b.setAttr('title', `${it.name}: ${state}. ${it.tip} Click for details.`);
       b.setAttr('aria-label', `${it.name}: ${state}`);
       b.addEventListener('click', () => this.openPanel({ kind: 'watch', id: it.k }));
@@ -4674,6 +4715,7 @@ class AgentBrainPlugin extends Plugin {
     this.addCommand({ id: 'open-mini', name: 'Open mini brain in the right sidebar', callback: () => this.activateMini() });
     this.addCommand({ id: 'daily-note', name: "Write and open today's activity note", callback: async () => { const p = await this.writeDailyNote(null, true); if (!p) new Notice('Agent Brain: no activity recorded today yet.'); } });
     this.addCommand({ id: 'session-note', name: 'Save the focused or latest session as a note', callback: async () => { const D = this.daily, sid = this.focusedSession(); const k = D && (D.sessions[sid] ? sid : Object.keys(D.sessions).sort((p, q) => D.sessions[q].last - D.sessions[p].last)[0]); const p = k && await this.writeSessionNote(k, true); if (!p) new Notice('Agent Brain: no session recorded today yet.'); } });
+    this.addCommand({ id: 'copy-review', name: 'Copy a review summary of how you use Claude Code (numbers only)', callback: () => this.copyReview() });
     this.addCommand({ id: 'reset-learned', name: 'Forget learned connections', callback: () => this.resetLearned() });
     this.addCommand({ id: 'reset-engram', name: 'Clear the activity trace', callback: () => { this.resetEngram(); new Notice('Agent Brain: activity trace cleared.'); } });
     this.addCommand({ id: 'install-hooks', name: 'Install Claude Code hooks on this computer', callback: () => this.installLocalHooks() });
@@ -5315,7 +5357,7 @@ class AgentBrainPlugin extends Plugin {
     const now = Date.now();
     const same = s.alarm && s.alarm.key === key;
     s.alarm = { key, text, since: same ? s.alarm.since : now, at: now, notified: same ? s.alarm.notified : false };
-    if (!s.alarm.notified && this.settings.notifyStuck) { this.alert(s, 'may be stuck', text); s.alarm.notified = true; }
+    if (!s.alarm.notified && this.settings.notifyStuck) { this.alert(s, 'may be stuck', text + '. What to do: ' + explainFinding({ group: 'stuck' }).todo); s.alarm.notified = true; }
     this.forEachView(v => { if (v.onAlarm) v.onAlarm(s); if (v.requestHud) v.requestHud(); });
   }
   clearAlarm(s) { if (!s.alarm) return; s.alarm = null; this.forEachView(v => v.requestHud && v.requestHud()); }
@@ -5721,7 +5763,7 @@ class AgentBrainPlugin extends Plugin {
   // everything read into one turn: what it rests on, what it risks, what it got wrong, and a report at the end
   checkReality(rec, ev, s, a, now) {
     const e = rec.e;
-    if (e === 'UserPromptSubmit' || !s.turnCheck) s.turnCheck = { tests: [], misses: [], sources: [], taint: null, fails: {}, t0: now, cost0: this.costOf(s), waitAt: 0, waitMs: 0 };
+    if (e === 'UserPromptSubmit' || !s.turnCheck) s.turnCheck = { tests: [], misses: [], sources: [], taint: null, fails: {}, t0: now, cost0: this.costOf(s), tok0: this.cacheTokens(s.id), waitAt: 0, waitMs: 0 };
     if (e === 'InstructionsLoaded' && /(^|[\\/])CLAUDE(\.local)?\.md$/i.test(String(ev.file_path || '')) && ev.cwd && String(ev.file_path).replace(/\\/g, '/').startsWith(String(ev.cwd).replace(/\\/g, '/'))) s.hasCm = true;   // the project's own, not the one in your home folder
     if (e === 'UserPromptSubmit') {
       // a few yes/no features of the prompt, never its text; a correction ("no, …", "revert") marks the turn before as corrected
@@ -5835,13 +5877,25 @@ class AgentBrainPlugin extends Plugin {
       if (o) ap.push({ k: rule.key, r: rule.rule, l: rule.label, o, w: Math.max(0, Math.min(w, 3600000)) });
     }
     const M = this.metab && this.metab.get(s.id);
+    // the share of this turn's context that came from the prompt cache (null without telemetry)
+    const k0 = T.tok0 || { all: 0, read: 0 }, k1 = this.cacheTokens(s.id), all = k1.all - k0.all;
+    const ch = all > 0 ? Math.round(100 * (k1.read - k0.read) / all) / 100 : null;
     const kinds = (s.reality || []).filter(f => f.t >= T.t0).map(f => f.kind || '').filter(Boolean);
     const U = this.usage || (this.usage = []);
-    const entry = { t: rep.t1, p: s.project || '', d: rep.dur, w: rep.wait, c: rep.calls, f: rep.fails, n: rep.findings, k: kinds.slice(0, 12), $: Math.round(rep.cost * 1e4) / 1e4, ts: rep.tests, e: rep.files.length, st: !!T.stuck, cx: M && M.ctx ? Math.round(100 * M.ctx / ctxLimit(M)) / 100 : 0, ap: ap.slice(0, 20), pf: T.pf || null, cm: s.hasCm ? 1 : 0 };
+    const entry = { t: rep.t1, p: s.project || '', d: rep.dur, w: rep.wait, c: rep.calls, f: rep.fails, n: rep.findings, k: kinds.slice(0, 12), $: Math.round(rep.cost * 1e4) / 1e4, ts: rep.tests, e: rep.files.length, st: !!T.stuck, cx: M && M.ctx ? Math.round(100 * M.ctx / ctxLimit(M)) / 100 : 0, ap: ap.slice(0, 20), pf: T.pf || null, cm: s.hasCm ? 1 : 0, rt: rep.retries, ch };
     U.push(entry); s.lastUsage = entry; (this.lastUsageByProj || (this.lastUsageByProj = {}))[s.project || ''] = entry;
     if (U.length && U[0].t < Date.now() - 29 * 86400000) this.usage = foldOld(U, this.usageWeeks || (this.usageWeeks = {}), Date.now(), 28);
     while (this.usage.length > 4000) this.usage.shift();
     this.memDirty = true;
+  }
+  cacheTokens(sid) { const M = this.metab && this.metab.get(sid); return M ? { all: M.inTok + M.cacheRead + M.cacheWrite, read: M.cacheRead } : { all: 0, read: 0 }; }
+  // "Copy for a review": the recorded numbers as text, for a second opinion in any chat. Only written to the clipboard.
+  reviewText() { return reviewDigest(this.usage || [], this.usageWeeks || {}, Date.now(), { anon: !!this.settings.reviewAnon }); }
+  async copyReview() {
+    if (!(this.usage || []).length) { new Notice('Agent Brain: no turns recorded yet.'); return false; }
+    await navigator.clipboard.writeText(this.reviewText());
+    new Notice('Agent Brain: review summary copied. It holds numbers only; paste it into a chat to ask for a second opinion.');
+    return true;
   }
   usageNow() {
     const now = Date.now();
@@ -5950,6 +6004,16 @@ class AgentBrainPlugin extends Plugin {
     return maskSecrets(L.join('\n'));
   }
   // "this is normal here": findings you marked as expected in a project are not raised again
+  // the watchers' findings as cards (stuck alarms included), muted ones left out
+  findingIncidents(sessions) {
+    const items = [];
+    for (const s of sessions) {
+      if (!s) continue;
+      for (const f of s.reality || []) if (!this.isMuted(s, f)) items.push({ sid: s.id, f });
+      if (s.alarm) items.push({ sid: s.id, f: { group: 'stuck', kind: 'stuck', text: s.alarm.text, t: s.alarm.since } });
+    }
+    return incidents(items);
+  }
   isMuted(s, f) { const m = this.settings.muted && this.settings.muted[(s && s.project) || '']; return !!(m && m.includes(muteKey(f))); }
   muteFinding(project, rec) {
     const key = muteKey(rec), m = this.settings.muted = Object.assign({}, this.settings.muted), L = m[project || ''] = (m[project || ''] || []).slice();
@@ -5977,7 +6041,7 @@ class AgentBrainPlugin extends Plugin {
     // coach mode (off unless you turn it on): the finding goes back to the agent as context on its next tool result
     if (this.settings.coach === true && (f.important || f.group !== 'reality')) { const q = s.coachQ || (s.coachQ = []); if (q.length < 5) q.push(f.text); }
     const notify = f.group === 'reality' ? this.settings.notifyReality : this.settings.notifyGuard !== false;
-    if (f.important && notify && !this.isDemo(s)) this.alert(s, { guard: 'is about to do something risky', shield: 'may be following injected instructions' }[f.group] || 'may have it wrong', f.text);
+    if (f.important && notify && !this.isDemo(s)) { const X = explainFinding(f); this.alert(s, '· ' + X.title, (X.what ? cap(X.what) + '. ' : '') + 'What to do: ' + X.todo); }
     this.forEachView(v => { if (v.onDoubt) v.onDoubt(s, a, r); if (v.requestHud) v.requestHud(); });
   }
 
@@ -6298,7 +6362,7 @@ class AgentBrainPlugin extends Plugin {
     if (this._replaying) return;              // queued events are history, not something to act on now
     const demo = this.isDemo(s);
     const title = `Claude · ${this.sessionLabel(s)} ${what}${demo ? ' (demo)' : ''}`;
-    const body = clip(detail || '', 160);
+    const body = clip(detail || '', 280);
     new Notice(body ? `${title}\n${body}` : title, 10000);
     if (demo || !this.settings.desktopNotify || document.hasFocus()) return;
     try { if (window.Notification) new window.Notification(title, { body, silent: false }); } catch (e) { /* not available */ }
@@ -6721,6 +6785,8 @@ class BrainSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Use Claude Code better').setDesc('Keeps one line of numbers per finished turn (durations, counts, cost, kinds of warnings, the first words of commands you approved, yes/no features of each prompt) for the "Use Claude Code better" panel: four weeks in detail, then weekly sums for a year. Never prompts, file contents or paths. Off: nothing new is recorded.')
       .addToggle(t => t.setValue(this.plugin.settings.usage !== false).onChange(async (v) => { this.plugin.settings.usage = v; await save(); }))
       .addButton(b => b.setButtonText('Clear history').onClick(async () => { this.plugin.usage = []; this.plugin.usageWeeks = {}; this.plugin.lastUsageByProj = {}; for (const s of this.plugin.sessions.values()) s.lastUsage = null; await this.plugin.saveAll(); new Notice('Agent Brain: usage history cleared.'); }));
+    new Setting(containerEl).setName('Review summary: hide project names').setDesc('"Copy for a review" (in the "Use Claude Code better" panel) puts the recorded numbers on the clipboard, to paste into a chat for a second opinion. It never holds prompts, replies, code, command lines or file names. On: project names become "project 1", "project 2".')
+      .addToggle(t => t.setValue(this.plugin.settings.reviewAnon === true).onChange(async (v) => { this.plugin.settings.reviewAnon = v; await save(); }));
     new Setting(containerEl).setName('Coach mode').setDesc('Off by default. When on, guard, shield and important reality-check findings are sent back to Claude Code as context on its next tool result ("[Agent Brain] …"), so the agent can check itself. Never a decision and never a block: the agent reads it as a note. Needs the hooks installed again after you turn it on.')
       .addToggle(t => t.setValue(this.plugin.settings.coach === true).onChange(async (v) => { this.plugin.settings.coach = v; await save(); new Notice(`Agent Brain: coach mode ${v ? 'on' : 'off'}. Install the hooks again (Settings → Claude Code hooks → Install) for it to take effect.`, 8000); }));
     new Setting(containerEl).setName('Desktop notifications').setDesc('When Obsidian is in the background, also show a system notification.')
