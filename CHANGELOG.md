@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.17.1
+- The repository holds only the plugin and what builds, tests and releases it. The rules for changing the code (local only, watch never steer, one outgoing request, received content is data, nothing private on disk) are in CONTRIBUTING.md; security reports go through GitHub's *Report a vulnerability*. No change to the plugin itself.
+
 ## 0.17.0
 - **Watchers you can act on.** The Watchers panel is a list of what is still open, sorted by how much it asks of you: *Needs you now* (a risky command, a secret in the open, outside content followed by a risky step), *Worth a check* (a claim that the check contradicts, a package that does not exist, a loop) and *For the record* (a file that is not there, an out-of-date picture of a file). Each card says what happened in plain words and **what to do**; the watcher's own sentences and the calls behind them are one click away under *What the watcher saw*.
   Findings that belong together are one card: what an agent did after reading one web page or download (with each step listed), the guard finding on the same call, and the same finding again in the same session (*3 times*).
