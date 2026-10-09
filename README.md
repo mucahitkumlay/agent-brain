@@ -27,7 +27,9 @@ no tokens.
   were corrected half as often"), and lines for each project's CLAUDE.md. Only numbers and yes/no features are kept,
   never prompts or file contents. **Copy for a review** puts those numbers on the clipboard as text, to paste into any
   chat for a second opinion; Agent Brain itself sends nothing.
-- **Notes view** (<kbd>D</kbd>). Your vault by region, with search. Pick a note: the brain turns to it and a signal runs
+- **Notes view** (<kbd>D</kbd>). The brain switches to the *Notes* look: the cortex becomes a cloud of points in its
+  regions' colours, notes are large points in theirs, and links keep their natural axon paths, shaded from one region
+  to the other. Your vault by region, with search. Pick a note: the brain turns to it and a signal runs
   along each of its links, so you see where it lives and what it connects to. Notes are placed by their `type`, `kind`
   or `category`, their tags, their folder or your own rules (`type:wiki=occipital` in the settings), and the view says
   why each note is where it is.
@@ -193,7 +195,7 @@ Claude Code running on a remote machine reaches the plugin through a reverse SSH
 | <kbd>Space</kbd> | Freeze time, inspect signals (<kbd>,</kbd> <kbd>.</kbd> slower / faster) |
 | <kbd>[</kbd> <kbd>]</kbd> or <kbd>P</kbd> <kbd>N</kbd>, <kbd>Enter</kbd> | Previous / next signal (freezes time), open the selected one |
 | <kbd>S</kbd> <kbd>A</kbd> <kbd>T</kbd> <kbd>G</kbd> <kbd>E</kbd> | Sessions, activity, timeline (click to replay), regions, EEG |
-| <kbd>L</kbd> <kbd>M</kbd> <kbd>V</kbd> | Anatomy layers, MRI slice, look (anatomy or atlas) |
+| <kbd>L</kbd> <kbd>M</kbd> <kbd>V</kbd> | Anatomy layers, MRI slice, look (anatomy, atlas or notes) |
 | <kbd>F</kbd> <kbd>R</kbd> <kbd>H</kbd> <kbd>I</kbd> | Follow activity, reset view, hide everything, numbers and shortcuts |
 | <kbd>W</kbd> <kbd>U</kbd> <kbd>?</kbd> | Watchers, Use Claude Code better, what can I do here |
 | <kbd>D</kbd> | Notes: find a note in the brain |

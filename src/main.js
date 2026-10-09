@@ -422,7 +422,7 @@ void main() {
   #include <clipping_planes_vertex>
 }`;
 const BRAIN_FS = `
-uniform vec3 uLight; uniform vec3 uBase; uniform vec3 uRim; uniform float uGlass; uniform vec4 uCut; uniform float uCutOn; uniform float uLook;
+uniform vec3 uLight; uniform vec3 uBase; uniform vec3 uRim; uniform float uGlass; uniform vec4 uCut; uniform float uCutOn; uniform float uLook; uniform float uNotes;
 varying vec3 vN; varying vec3 vV; varying float vDepth; varying vec3 vAct; varying float vDim; varying vec3 vTrace; varying vec3 vW;
 #include <clipping_planes_pars_fragment>
 void main() {
@@ -452,6 +452,12 @@ void main() {
     float alphaA = clamp(0.012 + fres * gyr * 0.22 + a * 0.4 + min(tI * 0.04, 0.12), 0.0, 1.0) * mix(0.25, 1.0, vDim);
     col = mix(col, colA * mix(0.3, 1.0, vDim), uLook); alpha = mix(alpha, alphaA, uLook);
   }
+  // notes look: hardly any surface left, only a thin outline; the point cloud and the notes carry the shape
+  if (uNotes > 0.001) {
+    vec3 colN = vec3(0.32, 0.40, 0.58) * (0.006 + 0.32 * fres * gyr) + A * 0.5;
+    float alphaN = clamp(0.002 + fres * gyr * 0.06 + a * 0.22, 0.0, 1.0) * mix(0.25, 1.0, vDim);
+    col = mix(col, colN, uNotes); alpha = mix(alpha, alphaN, uNotes);
+  }
   // in front of an MRI slice the cortex turns into a faint glass outline, so the slice shows but the brain stays whole
   float ghost = uCutOn * (1.0 - smoothstep(-2.5, 0.5, dot(uCut.xyz, vW) + uCut.w));
   col = mix(col, uRim * (0.2 + 0.9 * fres) + A * 0.25, ghost);
@@ -471,7 +477,7 @@ void main() {
   #include <clipping_planes_vertex>
 }`;
 const POINT_FS = `
-uniform float uRing;
+uniform float uRing; uniform float uBright;
 varying vec3 vC; varying float vG;
 #include <clipping_planes_pars_fragment>
 void main() {
@@ -484,7 +490,7 @@ void main() {
   float halo = exp(-d * d * 2.2) * mix(0.25, 0.1, uRing);
   float ring = uRing * (1.0 - smoothstep(0.0, 0.09, abs(d - 0.6))) * 0.32;
   float v = core + halo + ring;
-  gl_FragColor = vec4(vC * v * (0.42 + 1.25 * vG), v);
+  gl_FragColor = vec4(vC * v * (0.42 + 1.25 * vG) * uBright, v * uBright);
 }`;
 // two ways to look at it: the realistic MRI glass, or a clear atlas where the brain is a faint shell and the neurons
 // (notes and files), synapses (links) and signals inside carry the picture
@@ -502,9 +508,13 @@ const PULSE_SEG = 10, PULSE_MAX = 480;   // the lit stretch of an axon behind a 
 // a signal crosses a long axon more slowly than a short one (1 = a link of about 30 mm)
 const pulsePace = (l) => Math.min(2.1, Math.max(0.7, 0.55 + ((l && l.len) || 30) / 66));
 const LOOKS = {
-  anatomy: { inner: 1, tract: 0.045, link: 0.05, dend: 0.09, learn: 0.22, node: 1, nodeSize: 1, tint: 0, spike: 1, bloom: 1, ring: 0, bg: 0x030407 },
-  atlas: { inner: 0.26, tract: 0.018, link: 0.085, dend: 0.15, learn: 0.4, node: 1.8, nodeSize: 1.3, tint: 0.45, spike: 1.25, bloom: 0.45, ring: 1, bg: 0x0a0b10 },
+  anatomy: { inner: 1, tract: 0.045, link: 0.05, dend: 0.09, learn: 0.22, node: 1, nodeSize: 1, tint: 0, spike: 1, bloom: 1, ring: 0, cloud: 0, maxPx: 44, bg: 0x030407 },
+  atlas: { inner: 0.26, tract: 0.018, link: 0.085, dend: 0.15, learn: 0.4, node: 1.8, nodeSize: 1.3, tint: 0.45, spike: 1.25, bloom: 0.45, ring: 1, cloud: 0, maxPx: 44, bg: 0x0a0b10 },
+  // notes: the vault is the picture. The cortex is only a cloud of points in its regions' colours, the notes are large
+  // and coloured by region, and the links run on the same axon paths, brighter and shading from one region to the next
+  notes: { inner: 0, tract: 0, link: 0.11, dend: 0.025, learn: 0.28, node: 3.4, nodeSize: 3.4, tint: 0.92, spike: 1.3, bloom: 0.3, ring: 1, cloud: 1, maxPx: 80, bg: 0x05060a },
 };
+const LOOK_NAMES = ['anatomy', 'atlas', 'notes'];
 
 /* ================================================================ view */
 
@@ -613,7 +623,7 @@ class BrainView extends ItemView {
     this.kpiEl = this.infoEl.createDiv({ cls: 'cb-kpis' });
     this.srcEl = this.infoEl.createDiv({ cls: 'cb-srcs' });
     const keys = this.infoEl.createDiv({ cls: 'cb-keys' });
-    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['W', 'Watchers'], ['D', 'Notes: find a note'], ['U', 'Use Claude Code better'], ['?', 'What can I do here?'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy or atlas'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], ['[ ] or P N', 'Previous / next signal'], ['Enter', 'Open the selected signal'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
+    for (const [k, d] of [['S', 'Sessions'], ['A', 'Activity'], ['T', 'Timeline'], ['G', 'Regions'], ['W', 'Watchers'], ['D', 'Notes: find a note'], ['U', 'Use Claude Code better'], ['?', 'What can I do here?'], ['E', 'EEG traces'], ['L', 'Anatomy layers'], ['V', 'Look: anatomy, atlas or notes'], ['M', 'MRI slice'], ['H', 'Hide everything'], ['Space', 'Freeze time, inspect signals'], ['[ ] or P N', 'Previous / next signal'], ['Enter', 'Open the selected signal'], [', .', 'Slower / faster'], ['F', 'Follow activity'], ['R', 'Reset the view'], ['Esc', 'Close, back to live']]) {
       const r = keys.createDiv({ cls: 'cb-key-row' });
       r.createEl('kbd', { text: k }); r.createSpan({ text: d });
     }
@@ -623,7 +633,7 @@ class BrainView extends ItemView {
     this.layersEl = root.createDiv({ cls: 'cb-pop cb-layers' });
     this.layersEl.createDiv({ cls: 'cb-pop-h', text: 'Look' });
     const segL = this.layersEl.createDiv({ cls: 'cb-seg cb-seg-wide cb-look' });
-    this.lookBtns = [['anatomy', 'Anatomy', 'Realistic MRI glass'], ['atlas', 'Atlas', 'See-through brain: neurons, synapses and signals stand out']].map(([v, l, ttl]) => {
+    this.lookBtns = [['anatomy', 'Anatomy', 'Realistic MRI glass'], ['atlas', 'Atlas', 'See-through brain: neurons, synapses and signals stand out'], ['notes', 'Notes', 'Your vault is the picture: a cloud of regions, large notes, their links']].map(([v, l, ttl]) => {
       const b = segL.createEl('button', { cls: 'cb-tl-btn', text: l }); b.setAttr('title', ttl + ' (V)');
       b.addEventListener('click', (e) => { e.stopPropagation(); this.setLook(v); });
       return [v, b];
@@ -796,7 +806,7 @@ class BrainView extends ItemView {
         uBase: { value: new THREE.Color(0x5d6a82) },
         uRim: { value: new THREE.Color(0x5b8dff).multiplyScalar(0.42) },
         uGlass: { value: this.plugin.settings.glass },
-        uLook: { value: this.plugin.settings.look === 'atlas' ? 1 : 0 },
+        uLook: { value: this.plugin.settings.look === 'atlas' ? 1 : 0 }, uNotes: { value: 0 },
       },
       transparent: true, depthWrite: true, side: THREE.FrontSide, clipping: true,
     });
@@ -1296,11 +1306,40 @@ class BrainView extends ItemView {
     g.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(n), 1));
     const mat = new THREE.ShaderMaterial({
       vertexShader: POINT_VS, fragmentShader: POINT_FS,
-      uniforms: { uScale: { value: 300 }, uRing: { value: 0 }, uMaxPx: { value: 48 } },
+      uniforms: { uScale: { value: 300 }, uRing: { value: 0 }, uMaxPx: { value: 48 }, uBright: { value: 1 } },
       transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending, clipping: true,
     });
     if (this.clipOn) mat.clippingPlanes = [this.clipPlane];
     return { g, mat };
+  }
+
+  // the notes look's brain: a sparse cloud of points just under the cortex, each in its region's colour
+  buildCloud() {
+    if (this.cloudObj) { this.scene.remove(this.cloudObj); this.cloudObj.geometry.dispose(); this.cloudObj = null; }
+    const P = this.mesh && this.mesh.pos, Nn = this.vNormal;
+    if (!P || !this.regions) return;
+    const parts = [];
+    for (const k of LOBE_ORDER) for (const side of ['L', 'R']) { const r = this.regions[k + side]; if (r && r.list && r.list.length) parts.push([k, r.list]); }
+    const total = parts.reduce((n, p) => n + p[1].length, 0);
+    if (!total) return;
+    const step = Math.max(1, Math.ceil(total / 9000));
+    let n = 0; for (const [, list] of parts) n += Math.ceil(list.length / step);
+    const cp = this.makePoints(n), pos = cp.g.attributes.position.array, col = cp.g.attributes.aColor.array, sz = cp.g.attributes.aSize.array;
+    let i = 0;
+    for (const [k, list] of parts) {
+      const t = this.lobeTint(k);
+      for (let j = 0; j < list.length; j += step) {
+        const v = list[j], h = ((v * 2654435761) >>> 0) / 4294967296, d = 0.8 + h * 2.5;
+        pos[i * 3] = P[v * 3] - Nn[v * 3] * d; pos[i * 3 + 1] = P[v * 3 + 1] - Nn[v * 3 + 1] * d; pos[i * 3 + 2] = P[v * 3 + 2] - Nn[v * 3 + 2] * d;
+        const b = 0.34 + h * 0.3;
+        col[i * 3] = (t.r * 0.8 + 0.2) * b; col[i * 3 + 1] = (t.g * 0.8 + 0.2) * b; col[i * 3 + 2] = (t.b * 0.8 + 0.2) * b;
+        sz[i] = 0.55 + h * 0.45; i++;
+      }
+    }
+    cp.g.setDrawRange(0, i);
+    this.cloudObj = new THREE.Points(cp.g, cp.mat); this.cloudObj.renderOrder = 1; this.cloudObj.frustumCulled = false; this.cloudObj.visible = false;
+    if (this.clipOn) cp.mat.clippingPlanes = [this.clipPlane];
+    this.scene.add(this.cloudObj);
   }
 
   /* ---------- place notes into lobes ---------- */
@@ -1515,29 +1554,34 @@ class BrainView extends ItemView {
     // one set of lines for a group of links: the axon (SEG pieces) and the twigs of its terminal arbour
     const lines = (group, weight) => {
       let nseg = 0; for (const l of group) nseg += SEG + (l.tw ? l.tw.seg.length / 6 : 0);
-      const pos = new Float32Array(Math.max(1, nseg) * 6), col = new Float32Array(pos.length);
+      const pos = new Float32Array(Math.max(1, nseg) * 6), col = new Float32Array(pos.length), tcol = new Float32Array(pos.length);
       let q = 0;
+      // tcol: the same brightness, in the colours of the two regions the axon joins (shading along its length)
+      const tset = (i, k, ta, tb, t) => { tcol[i] = k * (0.35 + 0.65 * (ta.r + (tb.r - ta.r) * t)); tcol[i + 1] = k * (0.35 + 0.65 * (ta.g + (tb.g - ta.g) * t)); tcol[i + 2] = k * (0.35 + 0.65 * (ta.b + (tb.b - ta.b) * t)); };
       for (const l of group) {
-        const Pp = l.pts, w = weight ? weight(l) : 1;
+        const Pp = l.pts, w = weight ? weight(l) : 1, ta = this.lobeTint(l.a.lobe), tb = this.lobeTint(l.b.lobe);
         for (let sg = 0; sg < SEG; sg++) {
           const x0 = Pp[sg * 3], y0 = Pp[sg * 3 + 1], z0 = Pp[sg * 3 + 2], x1 = Pp[sg * 3 + 3], y1 = Pp[sg * 3 + 4], z1 = Pp[sg * 3 + 5];
           const k0 = w * taper(sg / SEG) * fade(x0, y0, z0), k1 = w * taper((sg + 1) / SEG) * fade(x1, y1, z1);
           col[q] = col[q + 1] = col[q + 2] = k0; col[q + 3] = col[q + 4] = col[q + 5] = k1;
+          tset(q, k0, ta, tb, sg / SEG); tset(q + 3, k1, ta, tb, (sg + 1) / SEG);
           pos[q++] = x0; pos[q++] = y0; pos[q++] = z0; pos[q++] = x1; pos[q++] = y1; pos[q++] = z1;
         }
         if (l.tw) for (let k = 0; k < l.tw.seg.length; k += 6) {
           const f0 = w * 0.8 * fade(l.tw.seg[k], l.tw.seg[k + 1], l.tw.seg[k + 2]), f1 = w * 0.8 * fade(l.tw.seg[k + 3], l.tw.seg[k + 4], l.tw.seg[k + 5]);
           col[q] = col[q + 1] = col[q + 2] = f0; col[q + 3] = col[q + 4] = col[q + 5] = f1;
+          tset(q, f0, tb, tb, 0); tset(q + 3, f1, tb, tb, 0);
           for (let m = 0; m < 6; m++) pos[q++] = l.tw.seg[k + m];
         }
       }
-      return { pos, col, nseg };
+      return { pos, col, tcol, nseg };
     };
     const V = lines(vlinks);
     this.linkGeo = new THREE.BufferGeometry();
     this.linkGeo.setAttribute('position', new THREE.BufferAttribute(V.pos, 3));
     this.linkGeo.setAttribute('color', new THREE.BufferAttribute(V.col, 3));
     this.linkGeo.setDrawRange(0, V.nseg * 2);
+    this.linkColGray = V.col; this.linkColTint = V.tcol; this._linkTinted = false;
     this.linkObj = new THREE.LineSegments(this.linkGeo, new THREE.LineBasicMaterial({ color: 0x8aa2d6, vertexColors: true, transparent: true, opacity: 0.05, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending }));
     this.linkObj.renderOrder = 2; this.linkObj.frustumCulled = false;
     this.scene.add(this.linkObj);
@@ -1600,6 +1644,10 @@ class BrainView extends ItemView {
     // connections that weren't there at the last build light up as they form
     const fresh = this.learnedLinks ? [...learnedLinks.entries()].filter(([k2, l]) => l.learned && !this.learnedLinks.has(k2)).map(e => e[1]) : [];
     this.nodes = nodes; this.links = links; this.byPath = byPath;
+    // the notes look: the best-connected notes of each region keep their names on screen
+    for (const n of nodes) n.star = false;
+    for (const k of LOBE_ORDER) nodes.filter(n => n.lobe === k && !n.learned && n.deg >= 3).sort((a, b) => b.deg - a.deg).slice(0, k === 'thalamus' ? 3 : 2).forEach(n => { n.star = true; });
+    this.buildCloud();
     this.learnedLinks = learnedLinks;
     this.learnedCounts = { neurons: nLearned, synapses: nLearnedSyn };
     if (this.clipOn) for (const o of [this.linkObj, this.learnObj, this.dendObj, this.boutonObj, this.pulseObj]) if (o) o.material.clippingPlanes = [this.clipPlane];
@@ -2139,10 +2187,10 @@ class BrainView extends ItemView {
   }
 
   setLook(v, say) {
-    this.plugin.settings.look = v === 'atlas' ? 'atlas' : 'anatomy';
+    this.plugin.settings.look = LOOK_NAMES.includes(v) ? v : 'anatomy';
     this.plugin.saveAll();
     this.plugin.forEachView(w => { w.needsDraw = true; if (w.renderLookUi) w.renderLookUi(); });
-    if (say) this.flash(v === 'atlas' ? 'Atlas look: see-through brain' : 'Anatomy look');
+    if (say) this.flash(v === 'atlas' ? 'Atlas look: see-through brain' : v === 'notes' ? 'Notes look: your vault is the picture' : 'Anatomy look');
   }
   renderLookUi() { for (const [v, b] of this.lookBtns || []) b.toggleClass('is-on', (this.plugin.settings.look || 'anatomy') === v); }
   togglePop(which, force) {
@@ -2240,7 +2288,7 @@ class BrainView extends ItemView {
       else if (k === '?') this.togglePanelKind('guide');
       else if (k === 'l') this.togglePop('layers');
       else if (k === 'm') this.toggleSlice();
-      else if (k === 'v') this.setLook(this.plugin.settings.look === 'atlas' ? 'anatomy' : 'atlas', true);
+      else if (k === 'v') this.setLook(LOOK_NAMES[(LOOK_NAMES.indexOf(this.plugin.settings.look) + 1) % LOOK_NAMES.length] || 'atlas', true);
       else if (k === '[' || k === ']' || k === 'n' || k === 'p') this.cycleSpike(k === ']' || k === 'n' ? 1 : -1);
       else if (k === 'Enter') { if (!this.enterKey(t)) used = false; }
       else if (k === ' ') { if (this.frozen) this.setTimeScale(this.timeScale && this.timeScale < 1 ? this.timeScale : 1); else this.setTimeScale(0); }
@@ -2628,7 +2676,7 @@ class BrainView extends ItemView {
       sec('Your vault', '');
       item('Notes as neurons', 'Every note is a neuron, every link an axon. A connection grows between files Claude uses one after the other; signals follow it.', '', null);
       item('Find a note', 'Your notes by region, with search. Pick one: the brain turns to it and a signal runs along each of its links. Its type, tags or folder decide where it lives.', 'Notes', () => this.openPanel({ kind: 'notes', id: '' }), 'D');
-      item('Look and layers', 'Atlas look (see-through brain), anatomy layers and MRI slices.', 'Change look', () => { this.closePanel(); this.setLook(p.settings.look === 'atlas' ? 'anatomy' : 'atlas'); }, 'V');
+      item('Look and layers', 'Three looks: anatomy (MRI glass), atlas (see-through brain) and notes (your vault is the picture). Anatomy layers and MRI slices.', 'Change look', () => { this.closePanel(); this.setLook(LOOK_NAMES[(LOOK_NAMES.indexOf(p.settings.look) + 1) % LOOK_NAMES.length] || 'atlas'); }, 'V');
       sec('Try it all', '');
       item('Made-up sessions', 'Four sessions at once: reading notes, waiting for an approval, a workflow of agents, a loop.', 'Play demo', () => { this.closePanel(); p.runDemo(); });
       item('Setup check', 'Are the hooks installed, is telemetry on, is the graphics card used?', 'Open', () => this.openPanel({ kind: 'setup', back: { kind: 'guide', id: '' } }));
@@ -4467,19 +4515,33 @@ class BrainView extends ItemView {
     return out;
   }
 
-  // the look (anatomy or atlas), eased between the two so switching is a short crossfade
+  // the look in use: the notes view brings its own while it is open
+  lookName() {
+    if (this.panel && this.panel.kind === 'notes' && !this.mini) return 'notes';
+    const v = this.plugin.settings.look;
+    return LOOK_NAMES.includes(v) ? v : 'anatomy';
+  }
+  // the look, eased between anatomy, atlas and notes so switching is a short crossfade
   lookParams() {
-    const want = this.plugin.settings.look === 'atlas' ? 1 : 0, now = performance.now();
+    const want = this.lookName(), now = performance.now();
     const dt = Math.min(0.1, (now - (this._lookAt || now)) / 1000); this._lookAt = now;
-    if (this.lookK == null) this.lookK = want;
-    if (this.lookK !== want) { this.lookK += Math.sign(want - this.lookK) * Math.min(Math.abs(want - this.lookK), Math.max(dt, 0.016) * 2.5); this.needsDraw = true; }
-    const k = this.lookK, A = LOOKS.anatomy, B = LOOKS.atlas, L = this._look || (this._look = {});
-    for (const key in A) if (key !== 'bg') L[key] = A[key] + (B[key] - A[key]) * k;
-    L.k = k;
+    const W = this._lookW || (this._lookW = Object.fromEntries(LOOK_NAMES.map(k => [k, k === want ? 1 : 0])));
+    const step = Math.max(dt, 0.016) * 2.5;
+    let moved = false;
+    for (const k of LOOK_NAMES) { const t = k === want ? 1 : 0, d = t - W[k]; if (d) { W[k] += Math.sign(d) * Math.min(Math.abs(d), step); moved = true; } }
+    if (moved) this.needsDraw = true;
+    const L = this._look || (this._look = {});
+    for (const key in LOOKS.anatomy) if (key !== 'bg') { let v = 0; for (const k of LOOK_NAMES) v += W[k] * LOOKS[k][key]; L[key] = v; }
+    L.k = W.atlas + W.notes; L.n = W.notes;
     if ((this.plugin.settings.theme || 'night') !== this._theme) this.applyTheme();
-    if (this.scene && this.scene.background && this._lookBgK !== k) {
-      this._lookBgK = k;
-      this.scene.background.copy(this._bgA || (this._bgA = new THREE.Color(A.bg))).lerp(this._bgB || (this._bgB = new THREE.Color(B.bg)), k);
+    const sig = LOOK_NAMES.map(k => W[k].toFixed(3)).join(',');
+    if (this.scene && this.scene.background && this._lookBgK !== sig) {
+      this._lookBgK = sig;
+      // the theme's two backgrounds (anatomy, atlas); the notes look darkens the atlas one
+      const a = this._bgA || (this._bgA = new THREE.Color(LOOKS.anatomy.bg)), b = this._bgB || (this._bgB = new THREE.Color(LOOKS.atlas.bg));
+      const c = this._bgN || (this._bgN = new THREE.Color());
+      c.copy(b).multiplyScalar(0.6);
+      this.scene.background.setRGB(a.r * W.anatomy + b.r * W.atlas + c.r * W.notes, a.g * W.anatomy + b.g * W.atlas + c.g * W.notes, a.b * W.anatomy + b.b * W.atlas + c.b * W.notes);
     }
     return L;
   }
@@ -4498,7 +4560,7 @@ class BrainView extends ItemView {
       rim = acc.getHex();
     }
     if (U) { U.uBase.value.setHex(T.base); U.uRim.value.setHex(rim).multiplyScalar(0.42); }
-    this._bgA = new THREE.Color(bg[0]); this._bgB = new THREE.Color(bg[1]); this._lookBgK = null;
+    this._bgA = new THREE.Color(bg[0]); this._bgB = new THREE.Color(bg[1]); this._bgN = null; this._lookBgK = null;
     for (const k of LOBE_ORDER) LOBES[k].color = (T.lobes && T.lobes[k]) || NIGHT_LOBES[k];
     this._lobeTint = null;
     if (this.contentEl) this.contentEl.setAttr('data-cb-theme', name);
@@ -4514,7 +4576,7 @@ class BrainView extends ItemView {
   draw() {
     this.updateCamera();
     const U = this.brainMat.uniforms, LK = this.lookParams();
-    U.uLook.value = LK.k;
+    U.uLook.value = Math.min(1, LK.k); U.uNotes.value = LK.n;
     // pulses: upload the strongest MAXP to the GPU
     const env = (p) => { const r = p.rise || 0.18; const a = Math.min(1, p.t / r); const d = Math.max(0, 1 - (p.t - r) / (p.life - r)); return p.amp * a * a * (3 - 2 * a) * d * d; };
     const breath = this.breaths();
@@ -4564,9 +4626,24 @@ class BrainView extends ItemView {
       ng.attributes.position.needsUpdate = true; ng.attributes.aColor.needsUpdate = true; ng.attributes.aSize.needsUpdate = true; ng.attributes.aGlow.needsUpdate = true;
       this.nodeObj.material.uniforms.uScale.value = this.cssH * 0.9 * Math.min(2, window.devicePixelRatio || 1);
       this.nodeObj.material.uniforms.uRing.value = LK.ring;
-      this.nodeObj.material.uniforms.uMaxPx.value = 44 * this.renderer.getPixelRatio();
+      this.nodeObj.material.uniforms.uMaxPx.value = LK.maxPx * this.renderer.getPixelRatio();
     }
-    if (this.linkObj) this.linkObj.material.opacity = LK.link;
+    if (this.linkObj) {
+      this.linkObj.material.opacity = LK.link;
+      // in the notes look each axon takes the colours of the two regions it joins (same path, same twigs)
+      const tint = LK.n > 0.5;
+      if (tint !== this._linkTinted && this.linkColTint) {
+        this._linkTinted = tint;
+        const at = this.linkGeo.attributes.color; at.copyArray(tint ? this.linkColTint : this.linkColGray); at.needsUpdate = true;
+        this.linkObj.material.color.setHex(tint ? 0xffffff : 0x8aa2d6);
+      }
+    }
+    if (this.cloudObj) {
+      this.cloudObj.visible = LK.cloud > 0.01 && this.plugin.settings.showNotes !== false;
+      const cu = this.cloudObj.material.uniforms;
+      cu.uBright.value = LK.cloud; cu.uScale.value = this.cssH * 0.9 * Math.min(2, window.devicePixelRatio || 1); cu.uRing.value = 0; cu.uMaxPx.value = 7 * this.renderer.getPixelRatio();
+    }
+    this._lookN = LK.n;
     if (this.learnObj) this.learnObj.material.opacity = LK.learn;
     if (this.dendObj) this.dendObj.material.opacity = LK.dend;
     if (this.boutonObj) { const bu = this.boutonObj.material.uniforms; bu.uScale.value = this.cssH * 0.9 * Math.min(2, window.devicePixelRatio || 1); bu.uRing.value = 0; bu.uMaxPx.value = 12 * this.renderer.getPixelRatio(); }
@@ -4719,7 +4796,8 @@ class BrainView extends ItemView {
       const blocks = [];
       for (const k of ['frontal', 'motor', 'parietal', 'temporal', 'occipital', 'cerebellum']) {
         const lines = (live[k] || []).slice(0, 2);
-        if ((!this.plugin.settings.regionLabels || this.mini) && !lines.length) continue;
+        const notesLook = (this._lookN || 0) > 0.5;
+        if ((!this.plugin.settings.regionLabels || this.mini) && !lines.length && !(notesLook && this.counts && this.counts[k])) continue;
         const L = this.regions[k + 'L'], R = this.regions[k + 'R'];
         if (!L || !R) continue;
         const dl = (L.x - camPos.x) ** 2 + (L.y - camPos.y) ** 2 + (L.z - camPos.z) ** 2;
@@ -4736,12 +4814,13 @@ class BrainView extends ItemView {
           ctx.font = `10.5px ${mono}`; const bw = ctx.measureText(body).width;
           return { ln, body, pw, w: 10 + pw + 8 + bw };
         });
-        ctx.font = `600 11px ${mono}`; const tw = ctx.measureText(cap(LOBES[k].fn.replace(' · ', ', '))).width;
-        const fn = cap(LOBES[k].label.toLowerCase());
+        const ttl0 = notesLook ? cap(NOTE_KINDS[k] || LOBES[k].fn) : cap(LOBES[k].fn.replace(' · ', ', '));
+        ctx.font = `600 11px ${mono}`; const tw = ctx.measureText(ttl0).width;
+        const fn = cap(LOBES[k].label.toLowerCase()) + (notesLook && this.counts ? ` · ${this.counts[k] || 0} notes` : '');
         ctx.font = `10px ${mono}`; const fw = lines.length ? 0 : ctx.measureText(fn).width;
         const w = Math.max(tw, fw, ...rows.map(r => r.w));
         const h = 13 + (lines.length ? lines.length * 14 + 1 : 13);
-        blocks.push({ k, P, Q, right, rows, fn, w, h, top: Q.y - 12, x: right ? Q.x + 6 : Q.x - 6 - w, alpha: this.dim.has(k) ? 0.2 : lines.length ? 0.95 : 0.8 });
+        blocks.push({ k, P, Q, right, rows, fn, ttl: ttl0, w, h, top: Q.y - 12, x: right ? Q.x + 6 : Q.x - 6 - w, alpha: this.dim.has(k) ? 0.2 : lines.length ? 0.95 : 0.8 });
       }
       const cls = this.contentEl.classList;
       const drawerTop = cls.contains('cb-has-tl') ? this.cssH - 152 : this.cssH - 62;
@@ -4769,7 +4848,7 @@ class BrainView extends ItemView {
         ctx.textAlign = 'left';
         const tx = (w) => bk.right ? bk.x : bk.x + bk.w - w;
         ctx.font = `600 11px ${mono}`; ctx.fillStyle = `rgba(236,240,247,${alpha})`;
-        const ttl = cap(LOBES[bk.k].fn.replace(' · ', ', '));
+        const ttl = bk.ttl;
         ctx.fillText(ttl, tx(ctx.measureText(ttl).width), bk.top + 6);
         if (!bk.rows.length) {
           ctx.font = `10px ${mono}`; ctx.fillStyle = `rgba(150,160,178,${alpha})`;
@@ -4800,10 +4879,11 @@ class BrainView extends ItemView {
     }
     ctx.font = `500 11px ${mono}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     for (const n of this.nodes) {
-      const show = this.plugin.settings.showNotes !== false && (n === this.hover || (n.labelT > 0 && !this.mini));
+      const star = n.star && (this._lookN || 0) > 0.5 && !this.mini;
+      const show = this.plugin.settings.showNotes !== false && (n === this.hover || star || (n.labelT > 0 && !this.mini));
       if (!show || !n.vis) continue;
       if (n !== this.hover && (this.labelBlocks || []).some(bk => n.sx > bk.x - 90 && n.sx < bk.x + bk.w + 6 && n.sy > bk.top - 12 && n.sy < bk.top + bk.h + 8)) continue;
-      const a = n === this.hover ? 0.95 : Math.min(0.92, n.labelT / 1.2);
+      const a = n === this.hover ? 0.95 : Math.max(star ? 0.62 * this._lookN : 0, Math.min(0.92, n.labelT / 1.2));
       ctx.fillStyle = `rgba(240,244,250,${a})`;
       ctx.fillText(n.name, n.sx + 10, n.sy);
     }
@@ -6871,8 +6951,8 @@ class BrainSettingTab extends PluginSettingTab {
         if (!n || n < 1024 || n > 65535) return;
         this.plugin.settings.port = n; await save(); this.plugin.startServer();
       }));
-    new Setting(containerEl).setName('Look').setDesc('Anatomy: the realistic MRI glass brain. Atlas: a see-through brain where neurons (notes and files), synapses (links) and the signals stand out, tinted by region. Also in the layers menu, or press V.')
-      .addDropdown(d => d.addOption('anatomy', 'Anatomy').addOption('atlas', 'Atlas').setValue(this.plugin.settings.look || 'anatomy')
+    new Setting(containerEl).setName('Look').setDesc('Anatomy: the realistic MRI glass brain. Atlas: a see-through brain where neurons (notes and files), synapses (links) and the signals stand out, tinted by region. Notes: your vault is the picture, a cloud of regions with large notes and their links (the notes view, D, uses it while open). Also in the layers menu, or press V.')
+      .addDropdown(d => d.addOption('anatomy', 'Anatomy').addOption('atlas', 'Atlas').addOption('notes', 'Notes').setValue(this.plugin.settings.look || 'anatomy')
         .onChange(async (v) => { this.plugin.settings.look = v; await save(); this.plugin.forEachView(w => { w.needsDraw = true; if (w.renderLookUi) w.renderLookUi(); }); }));
     new Setting(containerEl).setName('Theme').setDesc('Night: the default. fMRI: a grey brain with hot and cool activations. Match Obsidian: your theme\'s background and accent colour. High contrast: black, with colour-blind safe (Okabe-Ito) region colours.')
       .addDropdown(d => { for (const [k, t] of Object.entries(THEMES)) d.addOption(k, t.label); d.setValue(this.plugin.settings.theme || 'night').onChange(async (v) => { this.plugin.settings.theme = v; await save(); this.plugin.forEachView(w => { w.needsDraw = true; }); }); });
