@@ -1,14 +1,5 @@
 # Fake keys in the detector tests of 0.11.1 (hunter2, abcdef…, xxxx, AWS's documented EXAMPLE key), from before
-# fixtures were built at run time: the commit as it is now, and an older copy of it that the release tags from
-# before the history rewrite still reach. Listed one by one, so any other finding still fails the scan.
-1dca75595a71ae779487b0c5abe54e0b42cf26bd:test/detectors.test.mjs:curl-auth-header:41
-1dca75595a71ae779487b0c5abe54e0b42cf26bd:test/detectors.test.mjs:curl-auth-user:41
-1dca75595a71ae779487b0c5abe54e0b42cf26bd:test/detectors.test.mjs:curl-auth-user:51
-1dca75595a71ae779487b0c5abe54e0b42cf26bd:test/detectors.test.mjs:curl-auth-user:57
-1dca75595a71ae779487b0c5abe54e0b42cf26bd:test/detectors.test.mjs:generic-api-key:45
-1dca75595a71ae779487b0c5abe54e0b42cf26bd:test/detectors.test.mjs:generic-api-key:57
-1dca75595a71ae779487b0c5abe54e0b42cf26bd:test/detectors.test.mjs:private-key:47
-1dca75595a71ae779487b0c5abe54e0b42cf26bd:test/detectors.test.mjs:private-key:62
+# fixtures were built at run time. Listed one by one, by commit and line, so any other finding still fails the scan.
 d7cdfce8b710271d0c85428cb4b4f9eae32b7e5f:test/detectors.test.mjs:curl-auth-header:41
 d7cdfce8b710271d0c85428cb4b4f9eae32b7e5f:test/detectors.test.mjs:curl-auth-user:41
 d7cdfce8b710271d0c85428cb4b4f9eae32b7e5f:test/detectors.test.mjs:curl-auth-user:51
